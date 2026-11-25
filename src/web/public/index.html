@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Strategy Lab · 玩家风格实验室</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="#experiment"
+        ><b>♠</b><span>STRATEGY LAB<small>玩家风格实验室</small></span></a
+      >
+      <div class="nav-label">WORKSPACE</div>
+      <nav aria-label="主导航">
+        <a href="#experiment" data-page="experiment">◫ <span>实验工作台</span><small>01</small></a>
+        <a href="#players" data-page="players">♧ <span>玩家配置库</span><small>02</small></a>
+        <a href="#catalog" data-page="catalog">▦ <span>策略档位浏览</span><small>03</small></a>
+        <a href="#settings" data-page="settings">⚙ <span>模型与提示词</span><small>04</small></a>
+      </nav>
+      <div class="sidebar-note">
+        <span class="dot"></span> 本机工作空间
+        <p>实验、原始响应和提示词版本<br />保存在本项目 artifacts 目录。</p>
+      </div>
+    </aside>
+    <main>
+      <div class="topline">
+        <span>RESEARCH / PLAYER STYLE INTELLIGENCE</span
+        ><span class="local-badge">LOCAL WORKSPACE</span>
+      </div>
+      <section id="model-progress" class="panel" role="status" aria-live="polite" hidden></section>
+      <div id="app"><p class="empty">正在加载工作台…</p></div>
+    </main>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <dialog id="preview-dialog">
+      <div class="dialog-head">
+        <h2>完整提示词预览</h2>
+        <button id="close-preview" class="secondary">关闭</button>
+      </div>
+      <p>包含固定输出约定与实际数据。预览不产生模型请求。</p>
+      <pre id="preview-content"></pre>
+    </dialog>
+  </body>
+</html>

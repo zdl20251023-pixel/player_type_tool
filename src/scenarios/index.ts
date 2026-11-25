@@ -86,9 +86,18 @@ function parseLine(line: string): AIActionEntry[] {
   })
 }
 
-function fromFixture(
-  fixture: (typeof fixtures)[number] | (typeof representativeFixtures)[number]
-): ScenarioType {
+export interface ScenarioFixture {
+  id: string
+  description: string
+  hero: number
+  cards: string
+  street: ScenarioType['street']
+  category: string
+  history: string
+  line: string
+}
+
+export function fromFixture(fixture: ScenarioFixture): ScenarioType {
   return {
     ...scenario(
       fixture.id,

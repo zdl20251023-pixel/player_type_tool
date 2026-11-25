@@ -196,6 +196,3 @@ export class AIServiceClient {
     return this.lookupTimeoutMs
   }
 }
-
-/** AI 服务客户端单例 */
-export const aiServiceClient = new AIServiceClient()

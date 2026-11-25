@@ -63,7 +63,20 @@ function timeline(scenario: ScenarioType): string[][] {
   return result
 }
 
-export function reportData(session: SessionType, runs: RunType[]) {
+export function reportData(
+  session: SessionType,
+  runs: RunType[],
+  styleConfigs: readonly { id: string; label: string; preflop: string; postflop: string }[] = styles
+) {
+  const styles = styleConfigs
+  const standardStyles =
+    styles.length === 3 &&
+    styles.every(
+      (style, i) =>
+        style.id === ['loose-weak', 'tight-aggressive', 'gto'][i] &&
+        style.preflop === ['vpip68-pfr7', 'vpip22-pfr16', 'gto'][i] &&
+        style.postflop === ['af0.5-wtsd79', 'af5.8-wtsd46', 'gto'][i]
+    )
   const scenes = session.scenarios.map((scenario) => {
     const groupRuns = styles.map((style) =>
       runs.filter((r) => r.scenario === scenario.id && r.style === style.id)
@@ -77,7 +90,9 @@ export function reportData(session: SessionType, runs: RunType[]) {
       ? '数据不全'
       : sourceValues.length > 1
         ? '来源变化，谨慎归因'
-        : verdict(scenario, groups)
+        : standardStyles
+          ? verdict(scenario, groups)
+          : '自定义玩家对比，请结合概率表分析'
     const outcome =
       judgement === '概率方向符合预期'
         ? 'fits'
@@ -87,7 +102,9 @@ export function reportData(session: SessionType, runs: RunType[]) {
             ? 'incomplete'
             : judgement.startsWith('来源')
               ? 'source'
-              : 'counter'
+              : judgement.startsWith('自定义')
+                ? 'ready'
+                : 'counter'
     const validation = validateScenario(scenario)
     const actionKeys = [
       ...new Set(groups.flat().flatMap((r) => actions(r.response).map((a) => a.key))),
@@ -177,7 +194,7 @@ export function reportData(session: SessionType, runs: RunType[]) {
     }
   })
   const counts = Object.fromEntries(
-    ['fits', 'same', 'counter', 'incomplete', 'source'].map((key) => [
+    ['fits', 'same', 'counter', 'incomplete', 'source', 'ready'].map((key) => [
       key,
       scenes.filter((s) => s.outcome === key).length,
     ])

@@ -39,7 +39,7 @@ export function profileProblem(response: unknown, plan: PlanType): string | null
   const config = record(record(response).solution_information).strategy_profile_config
   const matched = record(config).matched_profile_name
   if (
-    plan.style === 'gto'
+    plan.profile === 'gto'
       ? matched !== 'gto' && matched !== 'no_profile_applied'
       : matched !== plan.profile
   ) {
