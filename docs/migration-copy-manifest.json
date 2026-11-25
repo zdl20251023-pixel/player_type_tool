@@ -1,0 +1,102 @@
+[
+  {
+    "sha256": "D878307D1B851837BD981151F6C754CFA7086F764F8B5DC8FAFE18115A31E96F",
+    "source": "scripts/lookup-profile-compare.ts",
+    "target": "src/runner/experiment.ts"
+  },
+  {
+    "sha256": "A9CB006AB3D9B84434D7AF59DF0CF869045D273A0CFC7CDC015A609186AE2C85",
+    "source": "scripts/lookup-profile-compare/analysis.ts",
+    "target": "src/analysis/strategy.ts"
+  },
+  {
+    "sha256": "8AF3AE3425EB992CCE849A852E910700FD2F117A291AD07775DA50435F9ECD17",
+    "source": "scripts/lookup-profile-compare/fixtures.ts",
+    "target": "src/scenarios/fixtures.ts"
+  },
+  {
+    "sha256": "53360183F9097F58D7A319671F7D1104AC25AEB313C9772D5C784A9EC0FA3E41",
+    "source": "scripts/lookup-profile-compare/scenarios.ts",
+    "target": "src/scenarios/index.ts"
+  },
+  {
+    "sha256": "8045ABC33AB907802E97494942BA138E318D73C11B61CA4E5F2CD3595131A19F",
+    "source": "scripts/lookup-profile-compare/validate.ts",
+    "target": "src/scenarios/validate.ts"
+  },
+  {
+    "sha256": "D014D1D3A03EDA5F6E6A58CED93B27961F331C539861E5DEB76BF72104D0B133",
+    "source": "scripts/lookup-profile-compare/session.ts",
+    "target": "src/storage/session.ts"
+  },
+  {
+    "sha256": "61C751E191AE3D5607BB2F4537FDFEFAEB8FB0E89E2332B6E7E66F41A4F2DB97",
+    "source": "scripts/lookup-profile-compare/summary.ts",
+    "target": "src/reports/markdown-summary.ts"
+  },
+  {
+    "sha256": "FDC437213DA590C2DE690AAD3BD4F152D627684BDDA7922FD150AF1E829F00D0",
+    "source": "scripts/lookup-profile-compare/html.ts",
+    "target": "src/reports/html.ts"
+  },
+  {
+    "sha256": "0637A10580FF5A13FBDC9D55964E9FE3F012C41D7072E028B27CA17705188D2C",
+    "source": "scripts/lookup-profile-compare/report-template.html",
+    "target": "src/reports/templates/report.html"
+  },
+  {
+    "sha256": "F70B1DBD08F54AD3427A11B159F27258DC51F051FB9C64321293409A2A45F239",
+    "source": "scripts/lookup-profile-compare/README.md",
+    "target": "docs/原工具运行说明.md"
+  },
+  {
+    "sha256": "F5BB8B2A66C8FDDC00FD047BF108728A5A45BFAD8471DE3F2F92ECFDD0C6B5B0",
+    "source": "src/player_profile/strategyProfile.catalog.ts",
+    "target": "src/profiles/strategyProfile.catalog.ts"
+  },
+  {
+    "sha256": "4C31DF73D70EF3D1ACCF7B07650BA78B269BECECFB8445B1F9118FFF49FB8AD9",
+    "source": "src/3rd_party/AI/client.ts",
+    "target": "src/client/client.ts"
+  },
+  {
+    "sha256": "063287676C4E1481303DDAD84F36846177DB9857BA01CECE512C2BAC0BD6194A",
+    "source": "src/3rd_party/AI/types.ts",
+    "target": "src/contracts/lookup.ts"
+  },
+  {
+    "sha256": "CBE918DAF94A2E61EB8A2D56CD67B3A0F308BF887626E37B64A3376F3618B229",
+    "source": "test/3rd_party/AI/lookup-profile-compare.test.ts",
+    "target": "tests/lookup-profile-compare.test.ts"
+  },
+  {
+    "sha256": "CE354849405C7BD2542CB50079DB30B89A6DEADBA272D114D7FFCA07B6B2C2F1",
+    "source": "test/3rd_party/AI/lookup-profile-cache.test.ts",
+    "target": "tests/lookup-profile-cache.test.ts"
+  },
+  {
+    "sha256": "EC39CC61E162C959AA08486957911E0D4F984B2845C67FD5341661A912F43967",
+    "source": "doc/AI_Interface/API/Strategy/三种玩家风格-100条行动线场景设计.md",
+    "target": "docs/100条行动线场景设计.md"
+  },
+  {
+    "sha256": "08884CA62F69B633CB3CC3579F35CA14448AB515BA6B38A4568523909277A719",
+    "source": "doc/AI_Interface/API/Strategy/lookup接口说明.md",
+    "target": "docs/lookup接口说明.md"
+  },
+  {
+    "sha256": "931B2C809180141146796F3A9A00AEEC1D18AE06E25F14070B222BE19256B6D1",
+    "source": "doc/AI_Interface/API/Strategy/strategy-profiles-v2-external.md",
+    "target": "docs/strategy-profiles-v2-external.md"
+  },
+  {
+    "sha256": "D93612E8EE6F0FDBB28269B4204BFB488D55EBC2D330C353A7621608113B8C6E",
+    "source": "doc/AI_Interface/API/Strategy/API接口定义.md",
+    "target": "docs/lookup原始API接口定义.md"
+  },
+  {
+    "sha256": "ADD517C3539F3FA56124F397B8B6F31E4F2ADCF43F512ACEAA329B671452DAB2",
+    "source": ".prettierrc.js",
+    "target": ".prettierrc.js"
+  }
+]

@@ -1,0 +1,5 @@
+node_modules/
+artifacts/
+docs/
+src/profiles/strategyProfile.catalog.ts
+src/reports/templates/*.html
