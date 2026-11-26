@@ -608,6 +608,180 @@ dialog {
 dialog::backdrop {
   background: #162d4266;
 }
+#hud-help-dialog {
+  width: min(1060px, 94vw);
+  height: min(860px, 90dvh);
+  max-height: 90dvh;
+  padding: 0;
+  border-color: #a8bacb;
+  box-shadow: 0 24px 80px #102b4633;
+}
+#hud-help-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#hud-help-dialog::backdrop {
+  background: #14283b99;
+}
+.hud-help-head {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 25px;
+  border-bottom: 1px solid #cbd5e1;
+  background: #f1f5f9;
+}
+.hud-help-head h2 {
+  margin: 4px 0 0;
+  font-size: 23px;
+  color: #172b45;
+}
+.hud-help-kicker {
+  font-size: 11px;
+  font-weight: 650;
+  color: #42635b;
+  letter-spacing: 1px;
+}
+.hud-help-head form {
+  margin: 0;
+}
+.hud-help-content {
+  padding: 12px 25px 24px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#hud-help-dialog p,
+#hud-help-dialog li {
+  font-size: 14px;
+  color: #354b63;
+  line-height: 1.85;
+}
+#hud-help-intro {
+  margin: 7px 0 18px;
+}
+.hud-help-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.hud-metric {
+  padding: 19px 20px;
+  border: 1px solid #cbd5e1;
+  border-top: 3px solid #276b58;
+  border-radius: 8px;
+  min-width: 0;
+}
+.hud-metric-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.hud-metric-heading h3 {
+  font-size: 22px;
+  margin: 0;
+  color: #123e33;
+}
+.hud-metric-heading h3 span {
+  font-size: 15px;
+  margin-left: 5px;
+  color: #263e54;
+}
+.hud-metric-heading > b {
+  font-size: 11px;
+  padding: 3px 7px;
+  border: 1px solid #bed6cc;
+  border-radius: 4px;
+  color: #245a46;
+  background: #edf6f1;
+}
+#hud-help-dialog .hud-metric-name {
+  font-size: 12px;
+  color: #526176;
+  margin: 4px 0 10px;
+}
+.hud-metric-formula {
+  padding: 10px 12px;
+  margin: 12px 0;
+  color: #1f4c3c;
+  background: #eaf4ee;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.8;
+}
+.hud-metric ul {
+  padding-left: 19px;
+  margin: 10px 0 0;
+}
+.hud-metric li + li {
+  margin-top: 4px;
+}
+.hud-help-examples {
+  padding: 21px 0 6px;
+}
+.hud-help-examples h3,
+.hud-help-context h3 {
+  color: #203c54;
+  font-size: 17px;
+}
+.hud-help-examples > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.hud-help-examples > div p {
+  padding: 14px 16px;
+  border: 1px solid #cedbe7;
+  border-radius: 6px;
+  background: #f4f7fb;
+  margin: 0;
+}
+.hud-help-examples strong,
+.hud-help-examples span {
+  display: block;
+}
+.hud-help-examples strong {
+  color: #1a3e5f;
+  margin-bottom: 7px;
+}
+.hud-help-context {
+  border-left: 4px solid #137257;
+  background: #ebf5ef;
+  padding: 16px 19px;
+  border-radius: 5px;
+}
+#hud-help-dialog .hud-help-source {
+  font-size: 12px;
+  color: #526176;
+  margin: 16px 0 0;
+}
+.hud-help-source a {
+  text-decoration: underline;
+}
+@media (max-width: 650px) {
+  .hud-help-grid,
+  .hud-help-examples > div {
+    grid-template-columns: 1fr;
+  }
+  .hud-help-head {
+    padding: 16px;
+  }
+  .hud-help-head h2 {
+    font-size: 20px;
+  }
+  .hud-help-content {
+    padding: 10px 16px 20px;
+  }
+  .hud-metric {
+    padding: 16px;
+  }
+}
 .dialog-head {
   display: flex;
   justify-content: space-between;
@@ -791,6 +965,141 @@ nav a.active {
 .analysis-text {
   font-size: 15px;
   color: #203e31;
+}
+.library-toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+  margin: 20px 0;
+}
+.library-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #40536b;
+  font-size: 13px;
+}
+.library-toolbar label:first-child {
+  flex: 1;
+  min-width: 220px;
+}
+.library-toolbar label:nth-child(3) {
+  flex: 1;
+  min-width: 220px;
+  max-width: 440px;
+}
+.library-toolbar input,
+.library-toolbar select {
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid #bac9d8;
+  border-radius: 6px;
+  background: #fff;
+  color: #243e58;
+  width: 100%;
+}
+.library-stats {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 15px 18px;
+  background: #eaf3ee;
+  border: 1px solid #b6d1c2;
+  border-radius: 7px;
+  color: #285b45;
+  font-size: 13px;
+}
+.library-stats b {
+  font-size: 23px;
+  margin-right: 5px;
+}
+.library-actions {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0 10px;
+}
+.library-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.library-actions > div:first-child > button:first-child {
+  background: #086b57;
+  color: #fff;
+  border-color: #086b57;
+}
+.library-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  margin-top: 16px;
+}
+.library-card {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 18px;
+  min-width: 0;
+}
+.library-card-heading {
+  display: flex;
+  gap: 10px;
+  align-items: start;
+  justify-content: space-between;
+}
+.library-card-heading label {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  cursor: pointer;
+  color: #18354e;
+  font-size: 14px;
+}
+.library-card-heading input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: #086b57;
+}
+.library-card-heading .chip {
+  white-space: nowrap;
+}
+.library-card p {
+  font-size: 13px;
+  line-height: 1.8;
+}
+.library-card summary {
+  font-size: 13px;
+}
+.library-card pre {
+  font-size: 13px;
+}
+.library-origins {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.library-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 22px 0 0;
+  font-size: 13px;
+  color: #40536b;
+}
+.library-warnings p {
+  font-size: 12px;
+  color: #885420;
+}
+@media (max-width: 1000px) {
+  .library-cards {
+    grid-template-columns: 1fr;
+  }
 }
 .batch-task-header {
   display: flex;

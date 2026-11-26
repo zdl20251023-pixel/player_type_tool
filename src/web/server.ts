@@ -5,6 +5,9 @@ import { comparisonScript } from '../reports/comparison-view'
 import { record } from '../analysis/strategy'
 import { diagnoseModel, type ModelResult } from '../client/model-stream'
 import { Workbench } from '../runner/workbench'
+import { TableRunner } from '../runner/table'
+import { readdir } from 'node:fs/promises'
+import { readScenarioLibrary, reuseLibraryScenarios } from '../storage/scenario-library'
 import { defaultPrompts } from '../analysis/prompts'
 import { fixtures } from '../scenarios/fixtures'
 import { representativeFixtures } from '../scenarios/representative'
@@ -16,7 +19,11 @@ import type { PromptTask } from '../contracts/workbench'
 const publicRoot = resolve(import.meta.dir, 'public')
 const reportScriptHash = createHash('sha256').update(comparisonScript).digest('base64')
 
-export function createWebHandler(workbench = new Workbench(), appScript?: string | Blob) {
+export function createWebHandler(
+  workbench = new Workbench(),
+  appScript?: string | Blob,
+  tables = new TableRunner(workbench.store)
+) {
   const json = (value: unknown, status = 200) =>
     Response.json(value, {
       status,
@@ -41,6 +48,46 @@ export function createWebHandler(workbench = new Workbench(), appScript?: string
       }
       const path = decodeURIComponent(url.pathname)
       if (request.method === 'GET') {
+        const tableHand = /^\/api\/table-runs\/([A-Za-z0-9-]+)\/hands\/(\d+)$/.exec(path)
+        if (tableHand) {
+          return json(await tables.review(tableHand[1], Number(tableHand[2])))
+        }
+        if (path === '/api/table-runs') {
+          return json(await tables.list())
+        }
+        const table =
+          /^\/api\/table-runs\/([A-Za-z0-9-]+)(?:\/(stats\.csv|decision|logs)(?:\/(hands-\d{6}\.jsonl))?)?$/.exec(
+            path
+          )
+        if (table) {
+          if (!table[2]) {
+            return json(await tables.detail(table[1]))
+          }
+          if (table[2] === 'stats.csv') {
+            return new Response(await tables.csv(table[1]), {
+              headers: {
+                'Content-Type': 'text/csv; charset=utf-8',
+                'Content-Disposition': 'attachment; filename="table-stats.csv"',
+                'Cache-Control': 'no-store',
+              },
+            })
+          }
+          if (table[2] === 'decision') {
+            return json(
+              await workbench.store.read(['table-runs', table[1], 'pending-decision.json'], null)
+            )
+          }
+          if (table[3]) {
+            return new Response(
+              Bun.file(workbench.store.path('table-runs', table[1], 'logs', table[3])),
+              { headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' } }
+            )
+          }
+          const files = await readdir(workbench.store.path('table-runs', table[1], 'logs')).catch(
+            () => [] as string[]
+          )
+          return json(files.filter((f) => /^hands-\d{6}\.jsonl$/.test(f)).sort())
+        }
         if (path === '/api/bootstrap') {
           return json({
             settings: await workbench.publicSettings(),
@@ -52,6 +99,9 @@ export function createWebHandler(workbench = new Workbench(), appScript?: string
         }
         if (path === '/api/experiments') {
           return json(await workbench.list())
+        }
+        if (path === '/api/scenario-library') {
+          return json(await readScenarioLibrary(workbench.store))
         }
         if (path === '/api/scenario-generations') {
           return json(await workbench.scenarioBatches.list())
@@ -155,7 +205,7 @@ export function createWebHandler(workbench = new Workbench(), appScript?: string
             path === '/'
               ? Bun.file(resolve(publicRoot, 'index.html'))
               : path === '/style.css'
-                ? `${await Bun.file(resolve(publicRoot, 'style.css')).text()}\n${comparisonCss}`
+                ? `${await Bun.file(resolve(publicRoot, 'style.css')).text()}\n${comparisonCss}\n${await Bun.file(resolve(publicRoot, 'table.css')).text()}`
                 : appScript
                   ? typeof appScript === 'string'
                     ? Bun.file(appScript)
@@ -192,6 +242,27 @@ export function createWebHandler(workbench = new Workbench(), appScript?: string
       }
       const body: unknown = JSON.parse(bodyText)
       const obj = record(body)
+      if (path === '/api/table-runs') {
+        const table = await tables.create(body)
+        return json(await tables.start(table.id), 202)
+      }
+      const tableAction =
+        /^\/api\/table-runs\/([A-Za-z0-9-]+)\/(resume|pause|step|stop|configure)$/.exec(path)
+      if (tableAction) {
+        return json(
+          await save(() =>
+            tableAction[2] === 'configure'
+              ? tables.configure(tableAction[1], body)
+              : tableAction[2] === 'pause' || tableAction[2] === 'stop'
+                ? tables.pause(tableAction[1], tableAction[2] === 'stop')
+                : tables.start(tableAction[1], tableAction[2] === 'step')
+          ),
+          202
+        )
+      }
+      if (path === '/api/scenario-library/reuse') {
+        return json(await reuseLibraryScenarios(workbench.store, body))
+      }
       if (path === '/api/scenario-generations/preview') {
         return json(await workbench.scenarioBatches.preview(body))
       }

@@ -16,8 +16,10 @@
       <nav aria-label="主导航">
         <a href="#experiment" data-page="experiment">◫ <span>实验工作台</span><small>01</small></a>
         <a href="#players" data-page="players">♧ <span>玩家配置库</span><small>02</small></a>
-        <a href="#catalog" data-page="catalog">▦ <span>策略档位浏览</span><small>03</small></a>
-        <a href="#settings" data-page="settings">⚙ <span>模型与提示词</span><small>04</small></a>
+        <a href="#library" data-page="library">▣ <span>场景库</span><small>03</small></a>
+        <a href="#catalog" data-page="catalog">▦ <span>策略档位浏览</span><small>04</small></a>
+        <a href="#settings" data-page="settings">⚙ <span>模型与提示词</span><small>05</small></a>
+        <a href="#table" data-page="table">♤ <span>牌桌体验</span><small>06</small></a>
       </nav>
       <div class="sidebar-note">
         <span class="dot"></span> 本机工作空间
@@ -40,6 +42,120 @@
       </div>
       <p>包含固定输出约定与实际数据。预览不产生模型请求。</p>
       <pre id="preview-content"></pre>
+    </dialog>
+    <dialog id="hud-help-dialog" aria-labelledby="hud-help-title" aria-describedby="hud-help-intro">
+      <div class="hud-help-head">
+        <div>
+          <span class="hud-help-kicker">PLAYER STYLE / HUD REFERENCE</span>
+          <h2 id="hud-help-title">玩家风格指标说明</h2>
+        </div>
+        <form method="dialog"><button class="secondary" autofocus>关闭</button></form>
+      </div>
+      <div class="hud-help-content">
+        <p id="hud-help-intro">
+          VPIP / PFR 看翻前范围与加注倾向，AF / WTSD
+          看翻后主动性与摊牌倾向。四项结合阅读，才能形成玩家画像。
+        </p>
+        <div class="hud-help-grid">
+          <section class="hud-metric">
+            <div class="hud-metric-heading">
+              <h3>VPIP <span>自愿入池率</span></h3>
+              <b>翻前 · 百分比</b>
+            </div>
+            <p class="hud-metric-name">Voluntarily Put Money In Pot</p>
+            <p>翻前自愿投入筹码的手牌占比，包括跟注、跛入和加注，用于观察玩家的松紧程度。</p>
+            <div class="hud-metric-formula">VPIP = 自愿投入筹码的手牌数 ÷ 可统计手牌数 × 100%</div>
+            <ul>
+              <li>被迫支付的大小盲注、前注不计为自愿投入。</li>
+              <li>大盲位只过牌、没有自愿补入筹码，不计入 VPIP。</li>
+              <li>通常数值越高，参与的牌越多、范围越松。</li>
+            </ul>
+          </section>
+          <section class="hud-metric">
+            <div class="hud-metric-heading">
+              <h3>PFR <span>翻前加注率</span></h3>
+              <b>翻前 · 百分比</b>
+            </div>
+            <p class="hud-metric-name">Pre-Flop Raise</p>
+            <p>翻前至少加注过一次的手牌占比，包括首次加注、3-bet、4-bet 等，用于观察翻前主动性。</p>
+            <div class="hud-metric-formula">PFR = 翻前有加注的手牌数 ÷ 可统计手牌数 × 100%</div>
+            <ul>
+              <li>按手牌统计；同一手多次加注不会重复计为多手。</li>
+              <li>和 VPIP 一起看：VPIP 高、PFR 低，通常说明较多跟注或跛入。</li>
+              <li>两者差距小，说明自愿入池中较多采用加注。</li>
+            </ul>
+          </section>
+          <section class="hud-metric">
+            <div class="hud-metric-heading">
+              <h3>AF <span>激进系数</span></h3>
+              <b>翻后 · 比值</b>
+            </div>
+            <p class="hud-metric-name">Aggression Factor</p>
+            <p>
+              比较翻牌、转牌和河牌上的下注、加注次数与跟注次数，衡量翻后主动行为相对跟注的程度。
+            </p>
+            <div class="hud-metric-formula">AF =（下注次数 + 加注次数）÷ 跟注次数</div>
+            <ul>
+              <li>过牌和弃牌不进入这个公式；AF 不是百分比。</li>
+              <li>AF = 3，表示统计中下注与加注的总次数是跟注的 3 倍。</li>
+              <li>跟注次数为 0 时，不应直接理解成 AF = 0；显示方式取决于软件。</li>
+            </ul>
+          </section>
+          <section class="hud-metric">
+            <div class="hud-metric-heading">
+              <h3>WTSD <span>摊牌率</span></h3>
+              <b>翻后 · 百分比</b>
+            </div>
+            <p class="hud-metric-name">Went To Showdown</p>
+            <p>在已经看到翻牌的手牌中，最终进入摊牌的比例，用于观察玩家继续到摊牌的倾向。</p>
+            <div class="hud-metric-formula">
+              WTSD = 看过翻牌且进入摊牌的手牌数 ÷ 看过翻牌的手牌数 × 100%
+            </div>
+            <ul>
+              <li>翻前已经弃牌的手牌不进入分母。</li>
+              <li>较高可能表示更愿继续到底；较低可能表示翻后更容易弃牌，需结合牌力与其他指标。</li>
+              <li>不是摊牌胜率 W$SD，也不能单凭此项判断玩家水平。</li>
+            </ul>
+          </section>
+        </div>
+        <section class="hud-help-examples">
+          <h3>组合解读示例</h3>
+          <div>
+            <p>
+              <strong>VPIP 22% / PFR 18% / AF 2.5</strong
+              ><span>较紧、翻前以加注入池为主，可作为紧凶倾向的示例。</span>
+            </p>
+            <p>
+              <strong>VPIP 45% / PFR 5% / AF 1</strong
+              ><span>入池较松、翻前加注较少、翻后较被动，可作为松弱／跟注站倾向的示例。</span>
+            </p>
+          </div>
+          <p>
+            这是理解组合关系的示例，不是强制分类标准。人数、位置、级别和样本量都会影响解读；满员桌的经验阈值不能直接套用于本工具的
+            6 人桌。
+          </p>
+        </section>
+        <aside class="hud-help-context">
+          <h3>在本工具中如何使用</h3>
+          <p>
+            翻前选择 VPIP / PFR 档位，翻后选择 AF / WTSD 档位。catalog 的数值是上游快照，profileName
+            中的数字不保证等于实际指标。
+          </p>
+          <p>
+            <strong>单条场景的“弃／跟／过／主动”概率与动作 EV，不是长期 HUD 统计。</strong
+            >选择一个档位也不代表某个场景的跟注率、加注率必须等于该指标。
+          </p>
+        </aside>
+        <p class="hud-help-source">
+          分母、无行动机会及零分母等边界处理以具体 HUD 软件和上游统计口径为准。定义参考
+          <a
+            href="https://drivehud.com/knowledge-base/what-are-the-hud-stat-definitions/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >DriveHUD 指标说明 ↗</a
+          >。本弹窗仅提供说明，不修改配置或发送模型请求。
+        </p>
+      </div>
     </dialog>
   </body>
 </html>

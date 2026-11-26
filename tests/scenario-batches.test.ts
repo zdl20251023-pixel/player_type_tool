@@ -174,7 +174,7 @@ test('independent batches preserve valid partial routes, continue after a failur
     expect(attempts.get(3)).toBe(1)
     await workbench.scenarioBatches.resume(id, { batchIndex: 1 })
     job = await wait()
-    expect(job.batches[1].status).toBe('partial')
+    expect(job.batches[1].status, JSON.stringify(job.batches[1])).toBe('partial')
     expect(job.batches[1].problem).toContain('重复')
     expect(job.fixtures).toHaveLength(4)
     await workbench.scenarioBatches.resume(id, { batchIndex: 1 })

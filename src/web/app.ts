@@ -22,6 +22,8 @@ import {
 } from '../reports/comparison-view'
 import { modelPresets } from '../client/model-presets'
 import { ScenarioBatchUI } from './scenario-batches'
+import { ScenarioLibraryUI } from './scenario-library'
+import { TableUI } from './table'
 
 type Settings = WorkbenchSettings & {
   keys: Record<string, boolean>
@@ -145,6 +147,30 @@ const scenarioBatches = new ScenarioBatchUI({
     notice(`已将 ${fixtures.length} 条已校验临时结果放入草稿，可独立执行 solver`)
   },
 })
+
+const scenarioLibrary = new ScenarioLibraryUI({
+  api,
+  existing: () => {
+    captureDraft()
+    return draft.fixtures
+  },
+  notice,
+  apply: (fixtures, message) => {
+    captureDraft()
+    draft.fixtures = fixtures
+    draft.count = fixtures.length
+    validation = {}
+    persist()
+    page = 'experiment'
+    experimentTab = 'new'
+    location.hash = 'experiment'
+    render()
+    window.scrollTo(0, 0)
+    notice(message)
+  },
+})
+
+const tableExperience = new TableUI({ api, players: () => boot.settings.players, notice })
 
 function draftSignature() {
   return pretty([draft.requirements, draft.count, draft.playerIds, draft.fixtures])
@@ -412,6 +438,14 @@ function selectedPlayers() {
 function button(label: string, action: string, secondary = false, extra = '') {
   return `<button data-action="${action}" class="${secondary ? 'secondary' : ''}" ${extra}>${label}</button>`
 }
+function metricsHelpButton() {
+  return button(
+    '指标说明',
+    'show-metrics-help',
+    true,
+    'type="button" aria-haspopup="dialog" aria-controls="hud-help-dialog"'
+  )
+}
 function header(title: string, subtitle: string, actions = '') {
   return `<header><div><h1>${title}</h1><p>${subtitle}</p></div><div class="header-buttons">${actions}</div></header>`
 }
@@ -468,7 +502,7 @@ function routeCards() {
 function newExperiment() {
   return `<div class="steps"><div class="step active"><b>01</b>配置玩家</div><div class="step active"><b>02</b>设计场景</div><div class="step"><b>03</b>执行求解</div><div class="step"><b>04</b>对比与分析</div></div>
   <section class="panel"><div class="panel-header"><h2>实验设置 <small>Experiment setup</small></h2><span class="chip">6 人 · 100BB · 无前注 · 无抓注</span></div><div class="grid">${field('实验名称', 'experiment-name', draft.name)}${field('每组重复次数', 'repeats', draft.repeats, 'number', 'min="1" max="10"')}</div><div class="grid three">${playerCards(true)}</div><p class="muted">需要自定义风格？在「玩家配置库」描述、推荐并保存，再回到这里选择。</p></section>
-  <section class="panel"><div class="panel-header"><h2>场景设计 <small>Scenario design</small></h2><span class="muted">先预览、再校验，执行前保留完整快照</span></div><div class="split"><div>${area('描述实验要求', 'requirements', draft.requirements)}${imagePicker('scenarios')}<div class="grid">${field('生成数量', 'scenario-count', draft.count, 'number', 'min="1" max="100"')}<label class="field">已有场景街道筛选<select id="fixture-stage">${options([{ value: 'all', label: '全部街道' }, ...['preflop', 'flop', 'turn', 'river'].map((s) => ({ value: s, label: stages[s] }))])}</select></label></div>${scenarioBatches.controls()}<div class="actions">${button('预览分批计划与提示词', 'preview-scenarios', true)}${button('AI 分批生成场景', 'generate-scenarios')}${button('使用代表路线', 'use-representative', true)}${button('选用已有场景', 'use-existing', true)}</div></div><aside class="aside-panel"><h3>一组场景，多种风格</h3><p>所有玩家使用相同底牌、公共牌和历史，只改变当前决策玩家的策略档位。</p><p>先比较概率、EV 与动作尺寸，再让大模型解释差异。</p><p>${boot.settings.keys[boot.settings.model.provider] ? '● 大模型密钥已配置' : '○ 请先配置大模型密钥'}<br>${boot.settings.solverConfigured ? '● Solver 地址已配置' : '○ 请在 .env 配置 solver 地址'}</p><a href="#settings">管理模型与提示词 →</a></aside></div></section>
+  <section class="panel"><div class="panel-header"><h2>场景设计 <small>Scenario design</small></h2><span class="muted">先预览、再校验，执行前保留完整快照</span></div><div class="split"><div>${area('描述实验要求', 'requirements', draft.requirements)}${imagePicker('scenarios')}<div class="grid">${field('生成数量', 'scenario-count', draft.count, 'number', 'min="1" max="100"')}<label class="field">已有场景街道筛选<select id="fixture-stage">${options([{ value: 'all', label: '全部街道' }, ...['preflop', 'flop', 'turn', 'river'].map((s) => ({ value: s, label: stages[s] }))])}</select></label></div>${scenarioBatches.controls()}<div class="actions">${button('预览分批计划与提示词', 'preview-scenarios', true)}${button('AI 分批生成场景', 'generate-scenarios')}${button('使用代表路线', 'use-representative', true)}${button('选用内置场景', 'use-existing', true)}<a class="chip" href="#library">从场景库选用 →</a></div></div><aside class="aside-panel"><h3>一组场景，多种风格</h3><p>所有玩家使用相同底牌、公共牌和历史，只改变当前决策玩家的策略档位。</p><p>先比较概率、EV 与动作尺寸，再让大模型解释差异。</p><p>${boot.settings.keys[boot.settings.model.provider] ? '● 大模型密钥已配置' : '○ 请先配置大模型密钥'}<br>${boot.settings.solverConfigured ? '● Solver 地址已配置' : '○ 请在 .env 配置 solver 地址'}</p><a href="#settings">管理模型与提示词 →</a></aside></div></section>
   <section id="scenario-batch-panel" class="panel">${scenarioBatches.view()}</section><section class="panel"><div class="panel-header"><h2>场景预览 <small>${draft.fixtures.length} routes</small></h2>${button('校验全部路线', 'validate-routes', true)}</div><p class="muted">f 弃牌 / c 跟注 / x 过牌 / r 加注到 / b 下注 / @ 发公共牌。BTN=0、SB=1、BB=2、UTG=3、HJ=4、CO=5。</p>${routeCards()}<details><summary>批量 JSON 编辑 / 导入</summary>${area('场景数组', 'fixtures-json', pretty(draft.fixtures), true)}${button('应用 JSON', 'apply-json', true)}</details><div class="actions">${button('保存实验并查看请求计划', 'create-experiment')}<span class="hint">${draft.fixtures.length} 场景 × ${selectedPlayers().length} 玩家 × ${draft.repeats} 次 = ${draft.fixtures.length * selectedPlayers().length * draft.repeats} 次 solver 请求</span></div></section>`
 }
 function history() {
@@ -487,7 +521,11 @@ function results() {
 }
 function experimentPage() {
   return (
-    header('玩家风格实验工作台', '从风格描述到策略证据，让每次对比都有据可查。') +
+    header(
+      '玩家风格实验工作台',
+      '从风格描述到策略证据，让每次对比都有据可查。',
+      metricsHelpButton()
+    ) +
     `<div class="tabbar">${[
       ['new', '新建实验'],
       ['history', '实验记录'],
@@ -506,7 +544,7 @@ function experimentPage() {
 }
 function playersPage() {
   return (
-    header('玩家配置库', '用自然语言描述风格，或直接组合翻前和翻后档位。') +
+    header('玩家配置库', '用自然语言描述风格，或直接组合翻前和翻后档位。', metricsHelpButton()) +
     `<section class="panel"><h2>描述一个玩家 <small>AI assisted configuration</small></h2>${area('玩家描述', 'player-description', '翻前很松，喜欢跟注和跛入，很少主动加注；翻后偏被动，愿意跟到底。')}${imagePicker('player')}<div class="actions">${button('预览推荐提示词', 'preview-player', true)}${button('AI 推荐档位', 'recommend-player')}</div>${playerRecommendation ? `<div class="callout"><strong>${e(playerRecommendation.label)}</strong><p>${e(playerRecommendation.description)}</p><code>${e(playerRecommendation.preflop)} / ${e(playerRecommendation.postflop)}</code><div class="actions">${button('填入编辑器', 'accept-player', true)}</div></div>` : ''}</section><section class="panel"><h2>已保存的玩家 <small>最多 8 个，可跨实验复用</small></h2><div class="grid three">${playerCards(false)}</div></section><section class="panel"><h2>玩家编辑器</h2><div class="grid">${field('唯一 ID（字母、数字、连字符）', 'player-id', 'custom-player')}${field('玩家名称', 'player-label', '自定义玩家')}</div>${area('风格说明 / 推荐理由', 'player-summary', '描述此配置的风格和观察目标。')}<div class="grid">${profileSelect('preflop', 'player-preflop', 'gto')}${profileSelect('postflop', 'player-postflop', 'gto')}</div><div id="player-metrics"></div><div class="actions">${button('保存玩家配置', 'save-player')}<span class="hint">相同 ID 更新配置；已有实验快照保持原值。</span></div></section>`
   )
 }
@@ -561,11 +599,26 @@ function render() {
   app.innerHTML =
     page === 'players'
       ? playersPage()
-      : page === 'catalog'
-        ? catalogPageView()
-        : page === 'settings'
-          ? settingsPage()
-          : experimentPage()
+      : page === 'table'
+        ? header('牌桌体验', '六位 AI 对战 · 观看过程或快速累计真实策略统计', metricsHelpButton()) +
+          tableExperience.view()
+        : page === 'library'
+          ? header(
+              '场景库',
+              '统一查看本机保存的场景，按需复用到实验工作台。',
+              metricsHelpButton()
+            ) + `<div id="library-panel">${scenarioLibrary.view()}</div>`
+          : page === 'catalog'
+            ? catalogPageView()
+            : page === 'settings'
+              ? settingsPage()
+              : experimentPage()
+  if (page === 'table') {
+    tableExperience.mount()
+  }
+  if (page === 'library') {
+    scenarioLibrary.mount()
+  }
   if (page === 'catalog') {
     filterCatalog()
   }
@@ -713,6 +766,34 @@ function fillPlayer(p: PlayerConfig) {
 }
 
 const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void>> = {
+  'retry-navigation': () => navigate(page),
+  'reload-page': () => window.location.reload(),
+  'table-create': () => tableExperience.create(),
+  'table-configure': () => tableExperience.configure(),
+  'table-resume': () => tableExperience.control('resume'),
+  'table-payout': () => tableExperience.replayPayout(),
+  'table-pause': () => tableExperience.control('pause'),
+  'table-step': () => tableExperience.control('step'),
+  'table-stop': () => tableExperience.control('stop'),
+  'table-refresh': () => tableExperience.refresh(),
+  'table-history': () => tableExperience.loadHistory(),
+  'table-open': (b) => tableExperience.open(b.dataset.id!),
+  'table-logs': () => tableExperience.logs(),
+  'table-hand': (b) => tableExperience.loadHand(Number(b.dataset.number)),
+  'library-refresh': () => scenarioLibrary.load(),
+  'library-reset': () => scenarioLibrary.reset(),
+  'library-clear': () => scenarioLibrary.clear(),
+  'library-select-page': () => scenarioLibrary.selectPage(),
+  'library-select-filtered': () => scenarioLibrary.selectPage(true),
+  'library-page': (b) => scenarioLibrary.changePage(Number(b.dataset.delta)),
+  'library-replace': () => scenarioLibrary.reuse('replace'),
+  'library-append': () => scenarioLibrary.reuse('append'),
+  'show-metrics-help': (opener) => {
+    const dialog = $<HTMLDialogElement>('hud-help-dialog')
+    dialog.showModal()
+    dialog.querySelector<HTMLElement>('.hud-help-content')!.scrollTop = 0
+    dialog.addEventListener('close', () => opener.focus(), { once: true })
+  },
   'apply-model-result': async () => {
     if (pendingModel) {
       await applyModelResult(pendingModel, finishedModelResult)
@@ -1040,6 +1121,27 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
 }
 
 document.addEventListener('click', (event) => {
+  const nav = (event.target as HTMLElement).closest<HTMLAnchorElement>('nav a[data-page]')
+  if (
+    nav &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    !event.altKey &&
+    event.button === 0
+  ) {
+    if (!boot || !draft || !promptDrafts) {
+      return
+    }
+    event.preventDefault()
+    const next = nav.dataset.page!
+    if (location.hash === `#${next}`) {
+      navigate(next)
+    } else {
+      location.hash = next
+    }
+    return
+  }
   const b = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-action]')
   if (!b || b.disabled) {
     return
@@ -1059,8 +1161,30 @@ document.addEventListener('click', (event) => {
       b.textContent = label
     })
 })
+app.addEventListener(
+  'toggle',
+  (event) => {
+    const target = event.target as HTMLDetailsElement
+    if (target.open && target.dataset.tableHand) {
+      void tableExperience.loadHand(Number(target.dataset.tableHand))
+    }
+  },
+  true
+)
 app.addEventListener('change', (event) => {
   const input = event.target as HTMLInputElement
+  if (input.id.startsWith('table-')) {
+    tableExperience.changed()
+    return
+  }
+  if (input.dataset.libraryKey) {
+    scenarioLibrary.select(input.dataset.libraryKey, input.checked)
+    return
+  }
+  if (['library-stage', 'library-source'].includes(input.id)) {
+    scenarioLibrary.filter()
+    return
+  }
   if (input.dataset.imageTask) {
     void loadImages(input).catch((error: unknown) =>
       notice(error instanceof Error ? error.message : '图片读取失败')
@@ -1131,26 +1255,45 @@ app.addEventListener('change', (event) => {
   captureDraft()
 })
 app.addEventListener('input', (event) => {
+  if ((event.target as HTMLElement).id === 'library-search') {
+    scenarioLibrary.filter()
+    return
+  }
   if ((event.target as HTMLElement).id === 'catalog-search') {
     catalogPage = 0
     filterCatalog()
   }
 })
 $('close-preview').addEventListener('click', () => $<HTMLDialogElement>('preview-dialog').close())
-window.addEventListener('hashchange', () => {
+function navigate(next: string) {
   if (!boot || !draft || !promptDrafts) {
     return
   }
-  const next = location.hash.slice(1)
-  if (!['experiment', 'players', 'catalog', 'settings'].includes(next)) {
+  if (!['experiment', 'players', 'library', 'catalog', 'settings', 'table'].includes(next)) {
     return
   }
-  captureDraft()
-  capturePrompt()
+  try {
+    captureDraft()
+    capturePrompt()
+    if (page === 'table') {
+      tableExperience.leave()
+    }
+  } catch (error) {
+    notice(
+      `保存当前表单失败：${error instanceof Error ? error.message : '未知错误'}；已继续切换页面`
+    )
+  }
   page = next
-  render()
+  try {
+    render()
+  } catch (error) {
+    app.innerHTML =
+      header('页面未能加载', '可重试当前页面，或切换左侧其他功能。') +
+      `<section class="panel"><p class="error">${e(error instanceof Error ? error.message : '页面渲染失败')}</p><div class="actions">${button('重试打开页面', 'retry-navigation')}${button('刷新页面', 'reload-page', true)}</div></section>`
+  }
   window.scrollTo(0, 0)
-})
+}
+window.addEventListener('hashchange', () => navigate(location.hash.slice(1)))
 window.addEventListener('beforeunload', captureDraft)
 
 async function start() {
@@ -1194,7 +1337,9 @@ async function start() {
   } catch {
     /* 使用默认草稿 */
   }
-  page = ['experiment', 'players', 'catalog', 'settings'].includes(location.hash.slice(1))
+  page = ['experiment', 'players', 'library', 'catalog', 'settings', 'table'].includes(
+    location.hash.slice(1)
+  )
     ? location.hash.slice(1)
     : 'experiment'
   render()

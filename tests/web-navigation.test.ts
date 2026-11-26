@@ -28,6 +28,8 @@ test('current browser bundle renders settings against old bootstrap and recovers
     defaults: defaultPrompts(),
   }
   const listeners = new Map<string, () => void>()
+  const documentListeners = new Map<string, (event: MouseEvent) => void>()
+  let failTableRender = false
   const fields = new Map<
     string,
     { value: string; textContent: string; hidden: boolean; addEventListener: () => void }
@@ -37,6 +39,10 @@ test('current browser bundle renders settings against old bootstrap and recovers
   const root = {
     addEventListener() {},
     set innerHTML(value: string) {
+      if (failTableRender && value.includes('六人 AI 牌桌')) {
+        failTableRender = false
+        throw new Error('测试渲染中断')
+      }
       html = value
       fields.clear()
       // 仅实现应用访问的表单 DOM。未渲染的控件返回 null，复现原始第二次异常。
@@ -82,7 +88,9 @@ test('current browser bundle renders settings against old bootstrap and recovers
   const document = {
     querySelector: () => root,
     querySelectorAll: () => [],
-    addEventListener() {},
+    addEventListener(event: string, listener: (event: MouseEvent) => void) {
+      documentListeners.set(event, listener)
+    },
     getElementById: (id: string) =>
       id === 'close-preview' ? { addEventListener() {} } : (fields.get(id) ?? null),
   }
@@ -95,6 +103,7 @@ test('current browser bundle renders settings against old bootstrap and recovers
     },
     fetch: () => Promise.resolve(Response.json(bootstrap)),
     structuredClone,
+    Error,
     console,
     localStorage: { getItem: () => null, setItem() {} },
     setTimeout,
@@ -109,6 +118,32 @@ test('current browser bundle renders settings against old bootstrap and recovers
   expect(() => listeners.get('hashchange')!()).not.toThrow()
   expect(html).toContain('DeepSeek V4 Pro')
   expect(html).toContain('快速测试大模型')
+  location.hash = '#table'
+  expect(() => listeners.get('hashchange')!()).not.toThrow()
+  expect(html).toContain('牌桌设置')
+  let prevented = false
+  const navClick = {
+    button: 0,
+    preventDefault() {
+      prevented = true
+    },
+    target: {
+      closest(selector: string) {
+        return selector === 'nav a[data-page]' ? { dataset: { page: 'table' } } : null
+      },
+    },
+  } as unknown as MouseEvent
+  failTableRender = true
+  documentListeners.get('click')!(navClick)
+  expect(prevented).toBe(true)
+  expect(html).toContain('页面未能加载')
+  expect(html).toContain('测试渲染中断')
+  // The hash is unchanged: clicking the same navigation must recover the page.
+  documentListeners.get('click')!(navClick)
+  expect(html).toContain('六人 AI 牌桌')
+  expect(html).toContain('牌桌设置')
+  location.hash = '#settings'
+  expect(() => listeners.get('hashchange')!()).not.toThrow()
   // 模拟已失败的设置页，随后切换回其他导航。
   fields.delete('prompt-system')
   fields.delete('prompt-template')
