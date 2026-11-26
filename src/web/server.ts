@@ -15,6 +15,7 @@ import { validFixtures } from '../scenarios/generated'
 import { fromFixture } from '../scenarios'
 import { validateScenario } from '../scenarios/validate'
 import type { PromptTask } from '../contracts/workbench'
+import { localWebHosts, webAccess } from './access'
 
 const publicRoot = resolve(import.meta.dir, 'public')
 const reportScriptHash = createHash('sha256').update(comparisonScript).digest('base64')
@@ -22,7 +23,8 @@ const reportScriptHash = createHash('sha256').update(comparisonScript).digest('b
 export function createWebHandler(
   workbench = new Workbench(),
   appScript?: string | Blob,
-  tables = new TableRunner(workbench.store)
+  tables = new TableRunner(workbench.store),
+  access: { allowedHosts: readonly string[] } = { allowedHosts: localWebHosts }
 ) {
   const json = (value: unknown, status = 200) =>
     Response.json(value, {
@@ -39,8 +41,8 @@ export function createWebHandler(
   return async (request: Request): Promise<Response> => {
     try {
       const url = new URL(request.url)
-      if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
-        return json({ error: '仅支持本机访问' }, 403)
+      if (!access.allowedHosts.includes(url.hostname)) {
+        return json({ error: '此访问地址未获允许，请检查 WEB_ALLOWED_HOSTS 配置' }, 403)
       }
       const origin = request.headers.get('Origin')
       if (origin && origin !== url.origin) {
@@ -348,14 +350,15 @@ if (import.meta.main) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('WEB_PORT 必须为有效端口')
   }
+  const access = webAccess(process.env.WEB_HOST || '127.0.0.1', process.env.WEB_ALLOWED_HOSTS)
   Bun.serve({
-    hostname: '127.0.0.1',
+    hostname: access.hostname,
     port,
     idleTimeout: 255,
     maxRequestBodySize: 12000000,
-    fetch: createWebHandler(workbench, appBundle),
+    fetch: createWebHandler(workbench, appBundle, undefined, access),
   })
   process.stdout.write(
-    `Strategy Lab 已启动：http://127.0.0.1:${port}\n仅在显式点击执行时调用大模型或 solver。\n`
+    `Strategy Lab 已启动（监听 ${access.hostname}:${port}）：\n${access.allowedHosts.map((host) => `http://${host}:${port}`).join('\n')}\n仅在显式点击执行时调用大模型或 solver。\n`
   )
 }

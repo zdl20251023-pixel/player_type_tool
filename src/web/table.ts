@@ -7,6 +7,8 @@ import type { TableHand } from '../table/engine'
 import { reviewTableHand } from '../analysis/table-history'
 import { tableStatValues, type TableStat } from '../analysis/table-stats'
 import { escapeHtml as e } from '../reports/comparison-view'
+import { TablePlayerPicker } from './table-player-picker'
+import { tablePlayerKey, tablePlayerOrigin, tableSeatState, mergeTableSeats } from './table-players'
 
 type Host = {
   api: <T>(path: string, body?: unknown) => Promise<T>
@@ -49,12 +51,89 @@ export class TableUI {
   private handReviewRevision = 0
   private readonly payout = new TablePayout()
   private readonly seenPayouts = new Set<string>()
-  constructor(private readonly host: Host) {}
+  private readonly picker: TablePlayerPicker
+  private seatRevision = ''
+  private contextVersion = 0
+  private restoring: Promise<void> | null = null
+  constructor(private readonly host: Host) {
+    this.picker = new TablePlayerPicker({
+      players: host.players,
+      current: (seat) => (this.config ??= this.defaults()).seats[seat],
+      context: () => `${this.contextVersion}:${this.run?.id ?? 'new'}`,
+      apply: (seat, player) => {
+        this.capture()
+        this.config!.seats[seat] = structuredClone(player)
+        this.paint()
+        this.host.notice(
+          this.run
+            ? `已更换座位 ${seat + 1}，请保存设置后下手生效`
+            : `已为座位 ${seat + 1} 选择 ${player.label}`
+        )
+      },
+    })
+  }
+  async choosePlayer(seat: number, details = false) {
+    await this.restoring
+    this.capture()
+    this.picker.open(seat, details)
+  }
+  pickerClick(action: string, button: HTMLButtonElement) {
+    this.picker.click(action, button)
+  }
+  pickerChange(field: HTMLInputElement | HTMLSelectElement) {
+    this.picker.change(field)
+  }
+  reportPickerError(message: string) {
+    this.picker.reportError(message)
+  }
+  private seatCards() {
+    const c = (this.config ??= this.defaults())
+    return c.seats
+      .map((p, i) => {
+        const active = this.run?.hand?.players[i]?.config ?? this.run?.config.seats[i]
+        const saved = this.run?.nextSeats?.[i] ?? this.run?.config.seats[i]
+        const state = tableSeatState(p, saved, active)
+        const labels = {
+          new: '开始新体验后使用',
+          dirty: '待保存',
+          queued: '已保存，下手生效',
+          active: '已生效',
+        }
+        const position = this.run?.hand?.players[i]?.position
+        return `<article class="table-seat-config"><div class="table-seat-config-title"><b>座位 ${i + 1} · 首手 ${['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO'][i]}</b>${position ? `<small>当前 ${e(position)}</small>` : ''}</div><strong>${e(p.label)}</strong><small>${e(tablePlayerOrigin(p))}</small><code>翻前 ${e(p.preflop)}<br>翻后 ${e(p.postflop)}</code><span class="table-seat-config-state state-${state}">${labels[state]}</span>${state === 'dirty' || state === 'queued' ? `<small>当前手：${e(active!.label)}</small>` : ''}<div class="actions">${this.button('更换玩家', 'choose-player', false, `data-seat="${i}"`)}${this.button('查看参数', 'player-details', false, `data-seat="${i}"`)}</div></article>`
+      })
+      .join('')
+  }
+  private paintSeats(force = false) {
+    const target = document.getElementById('table-seat-cards')
+    const html = this.seatCards()
+    if (target && (force || this.seatRevision !== html)) {
+      target.innerHTML = html
+      this.seatRevision = html
+    }
+  }
+  private receive(next: TableRun, reset = false) {
+    const previous = this.run
+    if (!reset && previous?.id === next.id && next.updatedAt < previous.updatedAt) {
+      return
+    }
+    if (reset || !this.config || !previous) {
+      this.config = structuredClone(next.config)
+      this.config.seats = structuredClone(next.nextSeats ?? next.config.seats)
+    } else {
+      this.config.seats = mergeTableSeats(
+        this.config.seats,
+        previous.nextSeats ?? previous.config.seats,
+        next.nextSeats ?? next.config.seats
+      )
+    }
+    this.run = next
+  }
   private defaults(): TableConfig {
     const players = this.host.players()
     return {
       mode: 'watch',
-      seats: Array.from({ length: 6 }, (_, i) => players[i % players.length]),
+      seats: Array.from({ length: 6 }, (_, i) => structuredClone(players[i % players.length])),
       hands: 100,
       seed: Date.now() >>> 0,
       actionDelayMs: 2000,
@@ -74,7 +153,7 @@ export class TableUI {
     const check = (id: string, label: string, value: boolean) =>
       `<label class="table-checkbox"><input id="table-${id}" type="checkbox" ${value ? 'checked' : ''}>${label}</label>`
     const busy = this.run && ['running', 'waiting'].includes(this.run.status)
-    return `<aside class="panel table-settings"><h2>牌桌设置</h2><p class="muted">6 人 · 初始 100BB · 0.5/1BB · 无前注、无抓注、无抽水。座位固定，位置每手轮转。</p><div class="actions">${this.button('开始新体验（真实 solver）', 'create', Boolean(busy))}${this.button('保存设置／下手生效', 'configure', !this.run)}</div><label class="field">运行模式<select id="table-mode"><option value="watch" ${c.mode === 'watch' ? 'selected' : ''}>观看模式 · 动画与行动延迟</option><option value="fast" ${c.mode === 'fast' ? 'selected' : ''}>快速模式 · 无动画、无等待</option></select></label><div class="table-seat-selectors">${c.seats.map((p, i) => `<label class="field">座位 ${i + 1}（首手 ${['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO'][i]}）<select id="table-seat-${i}">${[...this.host.players(), ...(!this.host.players().some((o) => o.id === p.id) ? [p] : [])].map((o) => `<option value="${e(o.id)}" ${o.id === p.id ? 'selected' : ''}>${e(o.label)} · ${e(o.preflop)} / ${e(o.postflop)}</option>`).join('')}</select></label>`).join('')}</div>${field('hands', '目标手数（最高 1 亿手）', c.hands ?? 100, 1, 100000000)}${check('continuous', '观看时持续运行，直到手动停止', c.hands === null)}<label class="field">行动延迟（秒）<select id="table-action-delay">${[0, 1, 2, 3, 5, 10, 30, 60].map((n) => `<option value="${n}" ${c.actionDelayMs === n * 1000 ? 'selected' : ''}>${n} 秒</option>`).join('')}<option value="custom" ${![0, 1, 2, 3, 5, 10, 30, 60].includes(c.actionDelayMs / 1000) ? 'selected' : ''}>自定义</option></select></label><label class="field" id="table-custom-delay-field" ${[0, 1, 2, 3, 5, 10, 30, 60].includes(c.actionDelayMs / 1000) ? 'hidden' : ''}>自定义行动延迟（秒）<input id="table-action-custom" type="number" min="0" max="60" step="0.1" value="${c.actionDelayMs / 1000}"></label>${field('hand-delay', '每手结算后等待（秒）', c.handDelayMs / 1000, 0, 60)}${check('auto-next', '观看时自动开始下一手', c.autoNext)}${check('animations', '观看时播放牌桌动画', c.animations)}${check('rebuy', '筹码耗尽后自动补回 100BB', c.autoRebuy)}${field('seed', '随机种子（仅新体验可修改）', c.seed, 0, 4294967295)}<p class="muted">快速模式忽略所有展示等待。仍逐次请求真实 solver；耗时取决于接口与本地存盘。固定六人，无并行桌和静默随机代打。</p><p class="muted">玩家类型下手生效；节奏设置作用于后续等待。原始请求与响应先保存，再推进动作。异常默认暂停。</p></aside>`
+    return `<aside class="panel table-settings"><h2>牌桌设置</h2><p class="muted">6 人 · 初始 100BB · 0.5/1BB · 无前注、无抓注、无抽水。座位固定，位置每手轮转。</p><div class="actions">${this.button('开始新体验（真实 solver）', 'create', Boolean(busy))}${this.button('保存设置／下手生效', 'configure', !this.run)}</div><label class="field">运行模式<select id="table-mode"><option value="watch" ${c.mode === 'watch' ? 'selected' : ''}>观看模式 · 动画与行动延迟</option><option value="fast" ${c.mode === 'fast' ? 'selected' : ''}>快速模式 · 无动画、无等待</option></select></label><div class="table-seat-selectors" id="table-seat-cards">${this.seatCards()}</div>${field('hands', '目标手数（最高 1 亿手）', c.hands ?? 100, 1, 100000000)}${check('continuous', '观看时持续运行，直到手动停止', c.hands === null)}<label class="field">行动延迟（秒）<select id="table-action-delay">${[0, 1, 2, 3, 5, 10, 30, 60].map((n) => `<option value="${n}" ${c.actionDelayMs === n * 1000 ? 'selected' : ''}>${n} 秒</option>`).join('')}<option value="custom" ${![0, 1, 2, 3, 5, 10, 30, 60].includes(c.actionDelayMs / 1000) ? 'selected' : ''}>自定义</option></select></label><label class="field" id="table-custom-delay-field" ${[0, 1, 2, 3, 5, 10, 30, 60].includes(c.actionDelayMs / 1000) ? 'hidden' : ''}>自定义行动延迟（秒）<input id="table-action-custom" type="number" min="0" max="60" step="0.1" value="${c.actionDelayMs / 1000}"></label>${field('hand-delay', '每手结算后等待（秒）', c.handDelayMs / 1000, 0, 60)}${check('auto-next', '观看时自动开始下一手', c.autoNext)}${check('animations', '观看时播放牌桌动画', c.animations)}${check('rebuy', '筹码耗尽后自动补回 100BB', c.autoRebuy)}${field('seed', '随机种子（仅新体验可修改）', c.seed, 0, 4294967295)}<p class="muted">快速模式忽略所有展示等待。仍逐次请求真实 solver；耗时取决于接口与本地存盘。固定六人，无并行桌和静默随机代打。</p><p class="muted">玩家类型下手生效；节奏设置作用于后续等待。原始请求与响应先保存，再推进动作。异常默认暂停。</p></aside>`
   }
   view() {
     return `<div class="table-experience"><section id="table-live" class="panel table-view"><div id="table-status">${this.status()}</div><div id="table-surface">${this.surface()}</div></section><div id="table-settings">${this.settings()}</div><section id="table-metrics" class="panel table-statistics">${this.metrics()}</section><section class="panel table-session-history"><div class="panel-header"><h2>体验记录</h2>${this.button('刷新记录', 'history')}</div><div id="table-history">${this.historyView()}</div></section></div>`
@@ -188,6 +267,8 @@ export class TableUI {
   leave() {
     this.capture()
     this.payout.cancel()
+    this.picker.close()
+    this.contextVersion++
   }
   private statsTable(title: string, group: Record<string, TableStat>, kind: string) {
     return `<h3>${title}</h3><div class="table-wrap"><table><thead><tr><th>${kind}</th><th>玩家类型 · 已发牌手数</th><th>已发牌手数</th><th>翻前有效机会</th><th>VPIP</th><th>PFR</th><th>AF</th><th>WTSD</th><th>净赢 BB</th></tr></thead><tbody>${
@@ -316,13 +397,9 @@ export class TableUI {
       return
     }
     const old = this.config ?? this.defaults()
-    const configs = this.host.players()
     this.config = {
       mode: get('mode')!.value as TableConfig['mode'],
-      seats: Array.from(
-        { length: 6 },
-        (_, i) => configs.find((p) => p.id === get(`seat-${i}`)?.value) ?? old.seats[i]
-      ),
+      seats: structuredClone(old.seats),
       hands:
         get('mode')!.value === 'watch' && (get('continuous') as HTMLInputElement).checked
           ? null
@@ -370,6 +447,7 @@ export class TableUI {
       (this.run?.config ?? this.config)?.hands,
       this.run?.config.mode ?? this.config?.mode,
       this.run?.config.animations ?? this.config?.animations,
+      this.run ? null : this.config?.seats.map(tablePlayerKey),
     ])
     if (surface && revision !== this.revision) {
       const potDetailsOpen =
@@ -414,6 +492,7 @@ export class TableUI {
     if (settings && document.getElementById('table-settings')) {
       document.getElementById('table-settings')!.innerHTML = this.settings()
     }
+    this.paintSeats(settings)
     const create = document.querySelector<HTMLButtonElement>('[data-action="table-create"]')
     if (create) {
       create.disabled = Boolean(this.run && ['running', 'waiting'].includes(this.run.status))
@@ -430,9 +509,13 @@ export class TableUI {
       this.mounted = true
       const id = localStorage.getItem('strategy-lab-table')
       if (id && /^[A-Za-z0-9-]+$/.test(id)) {
-        void this.open(id).catch((error) =>
-          this.host.notice(error instanceof Error ? error.message : '读取牌桌失败')
-        )
+        this.restoring = this.open(id)
+          .catch((error) => {
+            this.host.notice(error instanceof Error ? error.message : '读取牌桌失败')
+          })
+          .finally(() => {
+            this.restoring = null
+          })
       }
       void this.loadHistory().catch(() => undefined)
     } else if (this.run) {
@@ -449,8 +532,10 @@ export class TableUI {
     this.loadingHands.clear()
     this.handIssues.clear()
     this.handReviewRevision++
-    this.run = await this.host.api<TableRun>('/table-runs', this.config)
-    localStorage.setItem('strategy-lab-table', this.run.id)
+    this.picker.close()
+    this.contextVersion++
+    this.receive(await this.host.api<TableRun>('/table-runs', this.config), true)
+    localStorage.setItem('strategy-lab-table', this.run!.id)
     this.paint(true)
     this.watch()
   }
@@ -478,19 +563,31 @@ export class TableUI {
     this.capture()
     this.config ??= this.defaults()
     this.config.seats[seat] = structuredClone(player)
+    this.paintSeats()
   }
   async control(action: string) {
     if (!this.run) {
       return
     }
-    this.run = await this.host.api<TableRun>(`/table-runs/${this.run.id}/${action}`, {})
+    const id = this.run.id
+    const next = await this.host.api<TableRun>(`/table-runs/${id}/${action}`, {})
+    if (this.run?.id !== id) {
+      return
+    }
+    this.receive(next)
     this.paint()
     this.watch()
   }
   async configure() {
     this.capture()
     if (this.run) {
-      this.run = await this.host.api<TableRun>(`/table-runs/${this.run.id}/configure`, this.config)
+      const id = this.run.id
+      const submitted = structuredClone(this.config)
+      const next = await this.host.api<TableRun>(`/table-runs/${id}/configure`, submitted)
+      if (this.run?.id !== id) {
+        return
+      }
+      this.receive(next)
       this.paint()
       this.host.notice('设置已保存；玩家档位将在下一手生效')
     }
@@ -502,15 +599,21 @@ export class TableUI {
     this.loadingHands.clear()
     this.handIssues.clear()
     this.handReviewRevision++
-    this.run = await this.host.api<TableRun>(`/table-runs/${id}`)
-    this.config = structuredClone(this.run.config)
+    this.picker.close()
+    this.contextVersion++
+    this.receive(await this.host.api<TableRun>(`/table-runs/${id}`), true)
     localStorage.setItem('strategy-lab-table', id)
     this.paint(true)
     this.watch()
   }
   async refresh() {
     if (this.run) {
-      this.run = await this.host.api<TableRun>(`/table-runs/${this.run.id}`)
+      const id = this.run.id
+      const next = await this.host.api<TableRun>(`/table-runs/${id}`)
+      if (this.run?.id !== id) {
+        return
+      }
+      this.receive(next)
       this.paint()
       this.watch()
     }
@@ -560,7 +663,7 @@ export class TableUI {
         if (this.run?.id !== id) {
           break
         }
-        this.run = next
+        this.receive(next)
         this.paint()
       }
     })()

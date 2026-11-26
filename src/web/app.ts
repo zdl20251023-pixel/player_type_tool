@@ -913,6 +913,8 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
   },
   'retry-navigation': () => navigate(page),
   'reload-page': () => window.location.reload(),
+  'table-choose-player': (b) => tableExperience.choosePlayer(Number(b.dataset.seat)),
+  'table-player-details': (b) => tableExperience.choosePlayer(Number(b.dataset.seat), true),
   'table-create': () => tableExperience.create(),
   'table-configure': () => tableExperience.configure(),
   'table-resume': () => tableExperience.control('resume'),
@@ -1414,7 +1416,8 @@ document.addEventListener('click', (event) => {
   const action = actions[b.dataset.action!]
   const roleAction = b.dataset.action!.startsWith('role-')
   const setupAction = b.dataset.action!.startsWith('setup-')
-  if (!action && !roleAction && !setupAction) {
+  const seatAction = b.dataset.action!.startsWith('seat-picker-')
+  if (!action && !roleAction && !setupAction && !seatAction) {
     return
   }
   const label = b.textContent
@@ -1422,15 +1425,18 @@ document.addEventListener('click', (event) => {
   b.textContent = '处理中…'
   void Promise.resolve()
     .then(() =>
-      setupAction
-        ? setup.click(b.dataset.action!, b)
-        : roleAction
-          ? roleLibrary.click(b.dataset.action!, b)
-          : action(b)
+      seatAction
+        ? tableExperience.pickerClick(b.dataset.action!, b)
+        : setupAction
+          ? setup.click(b.dataset.action!, b)
+          : roleAction
+            ? roleLibrary.click(b.dataset.action!, b)
+            : action(b)
     )
     .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : '操作失败'
       setup.reportError(message)
+      tableExperience.reportPickerError(message)
       notice(message)
     })
     .finally(() => {
@@ -1450,6 +1456,10 @@ app.addEventListener(
 )
 document.addEventListener('change', (event) => {
   const input = event.target as HTMLInputElement
+  if (input.id.startsWith('seat-picker-') || input.dataset.seatPickerKey) {
+    tableExperience.pickerChange(input)
+    return
+  }
   if (input.id.startsWith('batch-')) {
     setup.reportError('')
     scenarioBatches.update(input)
@@ -1558,6 +1568,10 @@ document.addEventListener('change', (event) => {
 })
 document.addEventListener('input', (event) => {
   const input = event.target as HTMLInputElement
+  if (input.id === 'seat-picker-search') {
+    tableExperience.pickerChange(input)
+    return
+  }
   if (input.id === 'history-search') {
     historySearch = input.value
     $('experiment-history-list').innerHTML = historyRows()
