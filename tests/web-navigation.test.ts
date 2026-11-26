@@ -6,6 +6,7 @@ import { styles } from '../src/profiles/styles'
 import { representativeFixtures } from '../src/scenarios/representative'
 import { catalogOptions } from '../src/profiles/catalog'
 import { createWebHandler } from '../src/web/server'
+import { roleById, roleToPlayer } from '../src/profiles/roles'
 
 test('current browser bundle renders settings against old bootstrap and recovers navigation without missing form fields', async () => {
   const built = await Bun.build({
@@ -18,7 +19,10 @@ test('current browser bundle renders settings against old bootstrap and recovers
   const bootstrap = {
     settings: {
       model: defaultModel,
-      players: styles.map((s) => ({ ...s, description: '测试玩家' })),
+      players: [
+        ...styles.map((s) => ({ ...s, description: '测试玩家' })),
+        { ...roleToPlayer(roleById('L2-A3-F1')), id: 'my-saved-role' },
+      ],
       prompts: defaultPrompts(),
       keys: { deepseek: false, gemini: false },
       solverConfigured: false,
@@ -29,6 +33,9 @@ test('current browser bundle renders settings against old bootstrap and recovers
   }
   const listeners = new Map<string, () => void>()
   const documentListeners = new Map<string, (event: MouseEvent) => void>()
+  const local = new Map<string, string>()
+  const toast = { textContent: '', hidden: true }
+  const requests: string[] = []
   let failTableRender = false
   const fields = new Map<
     string,
@@ -92,7 +99,11 @@ test('current browser bundle renders settings against old bootstrap and recovers
       documentListeners.set(event, listener)
     },
     getElementById: (id: string) =>
-      id === 'close-preview' ? { addEventListener() {} } : (fields.get(id) ?? null),
+      id === 'notice'
+        ? toast
+        : id === 'close-preview'
+          ? { addEventListener() {} }
+          : (fields.get(id) ?? null),
   }
   runInNewContext(script, {
     document,
@@ -101,11 +112,19 @@ test('current browser bundle renders settings against old bootstrap and recovers
       addEventListener: (event: string, listener: () => void) => listeners.set(event, listener),
       scrollTo() {},
     },
-    fetch: () => Promise.resolve(Response.json(bootstrap)),
+    fetch: (_path: string, options?: RequestInit) => {
+      requests.push(options?.method ?? 'GET')
+      return Promise.resolve(Response.json(bootstrap))
+    },
     structuredClone,
     Error,
     console,
-    localStorage: { getItem: () => null, setItem() {} },
+    localStorage: {
+      getItem: (key: string) => local.get(key) ?? null,
+      setItem(key: string, value: string) {
+        local.set(key, value)
+      },
+    },
     setTimeout,
     clearTimeout,
   })
@@ -114,6 +133,14 @@ test('current browser bundle renders settings against old bootstrap and recovers
   }
   expect(errorText).toBe('')
   expect(html).toContain('玩家风格实验工作台')
+  // New preparation starts empty even when saved personal role configurations exist.
+  expect(html).toContain('已选对比玩家')
+  expect(html).toContain('还没有对比玩家')
+  expect(html).toContain('还没有对比场景')
+  expect(html).not.toContain('data-action="remove-draft-role"')
+  expect(html).not.toContain('id="scenario-batch-panel"')
+  expect(html).not.toContain('id="requirements"')
+  expect(requests.every((method) => method === 'GET')).toBe(true)
   location.hash = '#settings'
   expect(() => listeners.get('hashchange')!()).not.toThrow()
   expect(html).toContain('DeepSeek V4 Pro')

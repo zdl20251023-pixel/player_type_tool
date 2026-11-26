@@ -1,6 +1,12 @@
 import Decimal from 'decimal.js'
 import { add, sub, type TableHand } from '../table/engine'
 
+export interface TableStatPlayer {
+  label: string
+  preflop: string
+  postflop: string
+  hands: number
+}
 export interface TableStat {
   hands: number
   opportunities: number
@@ -12,6 +18,7 @@ export interface TableStat {
   raises: number
   calls: number
   profit: number
+  players?: Record<string, TableStatPlayer>
 }
 export type TableStatistics = {
   position: Record<string, TableStat>
@@ -42,7 +49,26 @@ export function addTableStats(stats: TableStatistics, hand: TableHand) {
           raises: 0,
           calls: 0,
           profit: 0,
+          players: {},
         })
+      // A legacy row without membership must stay unknown until its journal is verified.
+      if (row.players) {
+        const key = JSON.stringify([
+          p.config.id,
+          p.config.label,
+          p.config.preflop,
+          p.config.postflop,
+        ])
+        const member =
+          row.players[key] ??
+          (row.players[key] = {
+            label: p.config.label,
+            preflop: p.config.preflop,
+            postflop: p.config.postflop,
+            hands: 0,
+          })
+        member.hands++
+      }
       row.hands++
       row.opportunities += Number(p.preflopActed)
       row.vpip += Number(p.vpip)
@@ -55,6 +81,11 @@ export function addTableStats(stats: TableStatistics, hand: TableHand) {
       row.profit = add(row.profit, sub(p.stack, p.initial))
     }
   }
+}
+export function tableStatPlayers(row: TableStat) {
+  return Object.values(row.players ?? {})
+    .map((p) => `${p.label} · ${p.hands} 手`)
+    .join('；')
 }
 export function tableStatValues(row: TableStat) {
   const percent = (a: number, b: number) => (b ? new Decimal(a).div(b).mul(100).toFixed(2) : '—')

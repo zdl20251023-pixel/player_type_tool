@@ -24,6 +24,14 @@ import { modelPresets } from '../client/model-presets'
 import { ScenarioBatchUI } from './scenario-batches'
 import { ScenarioLibraryUI } from './scenario-library'
 import { TableUI } from './table'
+import { RoleLibraryUI } from './roles'
+import { roleToPlayer, addRoleToDraft } from '../profiles/roles'
+import { ExperimentSetupUI } from './experiment-setup'
+import {
+  emptyExperimentDraft,
+  readExperimentDraft,
+  type ExperimentDraft as Draft,
+} from './experiment-draft'
 
 type Settings = WorkbenchSettings & {
   keys: Record<string, boolean>
@@ -47,14 +55,6 @@ type Detail = {
     limitations: string[]
   } | null
 }
-type Draft = {
-  name: string
-  requirements: string
-  count: number
-  repeats: number
-  playerIds: string[]
-  fixtures: ScenarioFixture[]
-}
 
 const app = document.querySelector<HTMLElement>('#app')!
 const e = (v: unknown) =>
@@ -74,7 +74,6 @@ const date = (v: string) =>
   new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
 const pretty = (v: unknown) => JSON.stringify(v, null, 2)
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`)
-const positions = ['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO']
 const stages: Record<string, string> = {
   preflop: '翻前',
   flop: '翻牌',
@@ -96,6 +95,11 @@ const taskLabels: Record<PromptTask, string> = {
 }
 let boot: Boot
 let draft: Draft
+let recoverableDraft: Draft | null = null
+let resultView = 'overview'
+let historySearch = ''
+let historyStatus = ''
+let experimentStarting = false
 let page = 'experiment'
 let experimentTab = 'new'
 let detail: Detail | null = null
@@ -107,6 +111,8 @@ let validation: Record<
   { board: string[]; potBb: number; toCallBb: number; stackBb: number }
 > = {}
 let playerRecommendation: PlayerConfig | null = null
+let playersTab = 'roles'
+let playerEditorSource: PlayerConfig['sourceRole']
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 let catalogPage = 0
@@ -138,14 +144,8 @@ const scenarioBatches = new ScenarioBatchUI({
     $('preview-content').textContent = content
     $<HTMLDialogElement>('preview-dialog').showModal()
   },
-  apply: (fixtures) => {
-    captureDraft()
-    draft.fixtures = fixtures
-    validation = {}
-    persist()
-    render()
-    notice(`已将 ${fixtures.length} 条已校验临时结果放入草稿，可独立执行 solver`)
-  },
+  apply: (fixtures) => setup.setGenerated(fixtures),
+  changed: () => setup.batchChanged(),
 })
 
 const scenarioLibrary = new ScenarioLibraryUI({
@@ -171,9 +171,103 @@ const scenarioLibrary = new ScenarioLibraryUI({
 })
 
 const tableExperience = new TableUI({ api, players: () => boot.settings.players, notice })
+const roleLibrary = new RoleLibraryUI({
+  notice,
+  copy: (role) => {
+    playersTab = 'mine'
+    render()
+    fillPlayer({
+      ...roleToPlayer(role),
+      id: `role-${role.id.toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`,
+    })
+    $('player-id').removeAttribute('data-editing')
+    notice('已复制到玩家编辑器；修改后点击保存，不会覆盖内置角色或已有配置')
+  },
+  experiment: (role) => {
+    const player = roleToPlayer(role)
+    const collision = [...boot.settings.players, ...(draft.rolePlayers ?? [])].find(
+      (p) => p.id === player.id
+    )
+    if (collision) {
+      addRoleToDraft([collision], role)
+    }
+    const selected = selectedPlayers()
+    const next = addRoleToDraft(selected, role)
+    if (
+      !draft.rolePlayers?.some((p) => p.id === player.id) &&
+      !boot.settings.players.some((p) => p.id === player.id)
+    ) {
+      draft.rolePlayers = [...(draft.rolePlayers ?? []), player]
+    }
+    draft.playerIds = next.map((p) => p.id)
+    draft.hiddenPlayerIds = draft.hiddenPlayerIds?.filter((id) => id !== player.id)
+    persist()
+    notice(`已将 ${role.id} 加入实验草稿（已选 ${next.length}/8）；未改变已保存的实验`)
+  },
+  table: async (role, seat) => {
+    await tableExperience.prepareRole(roleToPlayer(role), seat)
+    location.hash = 'table'
+    notice(`已填入座位 ${seat + 1}：${role.id}。请在牌桌保存设置或开始新体验`)
+  },
+})
+
+const setup = new ExperimentSetupUI({
+  draft: () => draft,
+  selected: selectedPlayers,
+  players: () => boot.settings.players,
+  catalog: () => boot.catalog,
+  fixtures: () => boot.fixtures,
+  validation: () => validation,
+  validate: (value) => {
+    validation = value
+  },
+  changed: () => {
+    captureDraft()
+    persist()
+    if (page === 'experiment' && experimentTab === 'new') {
+      render()
+    }
+  },
+  api,
+  notice,
+  batches: () => scenarioBatches,
+  recoverable: () => recoverableDraft,
+  reset: () => {
+    if (draft.playerIds.length || draft.fixtures.length || draft.name || draft.requirements) {
+      recoverableDraft = structuredClone(draft)
+      localStorage.setItem('strategy-lab-previous-draft-v1', pretty(recoverableDraft))
+    }
+    scenarioBatches.detach()
+    draft = emptyExperimentDraft()
+    images.scenarios = []
+    validation = {}
+    persist()
+    render()
+    notice('已新建空白草稿；旧内容可通过“继续上次草稿”恢复')
+  },
+  recover: () => {
+    if (!recoverableDraft) {
+      throw new Error('没有可恢复的草稿')
+    }
+    scenarioBatches.detach()
+    const previous = structuredClone(draft)
+    draft = structuredClone(recoverableDraft)
+    draft.key ??= emptyExperimentDraft().key
+    recoverableDraft =
+      previous.playerIds.length || previous.fixtures.length || previous.name ? previous : null
+    validation = {}
+    persist()
+    render()
+    if (draft.generationId) {
+      void scenarioBatches.open(draft.generationId).catch((error) => notice(String(error)))
+    }
+  },
+  imagePicker: () => imagePicker('scenarios'),
+  starting: () => experimentStarting,
+})
 
 function draftSignature() {
-  return pretty([draft.requirements, draft.count, draft.playerIds, draft.fixtures])
+  return pretty([draft.key, draft.requirements, draft.count, draft.playerIds, draft.fixtures])
 }
 function savePendingModel() {
   try {
@@ -196,9 +290,7 @@ function modelPanel(html: string) {
 async function applyModelResult(pending: PendingModel, result: unknown) {
   captureDraft()
   if (pending.operation === 'generate') {
-    draft.fixtures = result as ScenarioFixture[]
-    validation = {}
-    persist()
+    setup.setGenerated(result as ScenarioFixture[])
   }
   if (pending.operation === 'regenerate') {
     const index = draft.fixtures.findIndex((s) => s.id === pending.routeId)
@@ -426,6 +518,7 @@ function notice(message: string) {
   }, 12000)
 }
 function persist() {
+  draft.savedAt = new Date().toISOString()
   try {
     localStorage.setItem('strategy-lab-draft-v1', pretty(draft))
   } catch {
@@ -433,7 +526,15 @@ function persist() {
   }
 }
 function selectedPlayers() {
-  return boot.settings.players.filter((p) => draft.playerIds.includes(p.id))
+  return draftPlayers().filter((p) => draft.playerIds.includes(p.id))
+}
+function draftPlayers() {
+  return [
+    ...boot.settings.players,
+    ...(draft.rolePlayers ?? []).filter(
+      (p) => !boot.settings.players.some((saved) => saved.id === p.id)
+    ),
+  ].filter((p) => !draft.hiddenPlayerIds?.includes(p.id))
 }
 function button(label: string, action: string, secondary = false, extra = '') {
   return `<button data-action="${action}" class="${secondary ? 'secondary' : ''}" ${extra}>${label}</button>`
@@ -475,52 +576,83 @@ function profileSelect(stage: string, id: string, selected: string) {
   )}</select></label>`
 }
 function playerCards(selectable: boolean) {
-  return boot.settings.players
+  const cards = (selectable ? draftPlayers() : boot.settings.players)
     .map(
       (p) =>
-        `<div class="player-card ${selectable && draft.playerIds.includes(p.id) ? 'selected' : ''}"><label>${selectable ? `<input type="checkbox" data-player="${e(p.id)}" ${draft.playerIds.includes(p.id) ? 'checked' : ''}>` : ''}${e(p.label)}</label><p>${e(p.description)}</p><code>翻前 ${e(p.preflop)}<br>翻后 ${e(p.postflop)}</code>${!selectable ? `<div class="actions">${button('编辑', 'edit-player', true, `data-id="${e(p.id)}"`)}${button('删除', 'delete-player', true, `data-id="${e(p.id)}"`)}</div>` : ''}</div>`
+        `<div class="player-card ${selectable && draft.playerIds.includes(p.id) ? 'selected' : ''}"><label>${selectable ? `<input type="checkbox" data-player="${e(p.id)}" ${draft.playerIds.includes(p.id) ? 'checked' : ''}>` : ''}${e(p.label)}</label><p>${e(p.description)}</p><code>翻前 ${e(p.preflop)}<br>翻后 ${e(p.postflop)}</code>${!selectable ? `<div class="actions">${button('编辑', 'edit-player', true, `data-id="${e(p.id)}"`)}${button('删除', 'delete-player', true, `data-id="${e(p.id)}"`)}</div>` : `<div class="actions">${button('从草稿移除', 'remove-draft-role', true, `data-id="${e(p.id)}"`)}</div><small class="muted">仅移出当前草稿，保留个人配置和历史实验。</small>`}</div>`
     )
     .join('')
-}
-function routeCards() {
+  const hidden = selectable
+    ? boot.settings.players.filter((p) => draft.hiddenPlayerIds?.includes(p.id)).length
+    : 0
   return (
-    draft.fixtures
-      .map((f, i) => {
-        const v = validation[f.id]
-        return `<article class="route-card"><div class="panel-header"><h3>${e(f.id)} · ${e(f.description)}</h3><span class="badge ${v ? '' : 'warn'}">${v ? '已校验' : '待校验'}</span></div><p>${positions[f.hero]} · ${e(f.cards)} · ${stages[f.street]} · ${e(f.category)}</p><pre>${e(f.line || '尚无自愿行动')}</pre><p>${e(f.history)}</p>${v ? `<span class="chip">底池 ${v.potBb}BB</span><span class="chip">待跟 ${v.toCallBb}BB</span><span class="chip">剩余 ${v.stackBb}BB</span>` : ''}
-    <details><summary>编辑此路线</summary><div class="grid">${field('场景编号', `route-${i}-id`, f.id, 'text', `data-route="${i}" data-key="id"`)}${field('Hero 底牌', `route-${i}-cards`, f.cards, 'text', `data-route="${i}" data-key="cards"`)}<label class="field">Hero 位置<select data-route="${i}" data-key="hero">${options(
-      positions.map((p, j) => ({ value: String(j), label: p })),
-      String(f.hero)
-    )}</select></label><label class="field">街道<select data-route="${i}" data-key="street">${options(
-      ['preflop', 'flop', 'turn', 'river'].map((s) => ({ value: s, label: stages[s] })),
-      f.street
-    )}</select></label></div>${field('设计目的', `route-${i}-description`, f.description, 'text', `data-route="${i}" data-key="description"`)}${field('场景类型', `route-${i}-category`, f.category, 'text', `data-route="${i}" data-key="category"`)}${area('完整行动线（金额 BB）', `route-${i}-line`, f.line, false, `data-route="${i}" data-key="line"`)}${area('路线说明', `route-${i}-history`, f.history, false, `data-route="${i}" data-key="history"`)}</details><div class="actions">${button('重新生成这条', 'regenerate-route', true, `data-index="${i}"`)}${button('移除此路线', 'remove-route', true, `data-index="${i}"`)}</div></article>`
-      })
-      .join('') || '<div class="empty">尚无场景。使用已有路线，或让大模型按要求生成。</div>'
+    cards +
+    (hidden
+      ? `<div class="draft-player-restore">${button(`恢复已移除的个人玩家（${hidden}）`, 'restore-draft-players', true)}<p class="muted">恢复后可重新勾选；临时角色可从内置库再次添加。</p></div>`
+      : '')
   )
 }
 function newExperiment() {
-  return `<div class="steps"><div class="step active"><b>01</b>配置玩家</div><div class="step active"><b>02</b>设计场景</div><div class="step"><b>03</b>执行求解</div><div class="step"><b>04</b>对比与分析</div></div>
-  <section class="panel"><div class="panel-header"><h2>实验设置 <small>Experiment setup</small></h2><span class="chip">6 人 · 100BB · 无前注 · 无抓注</span></div><div class="grid">${field('实验名称', 'experiment-name', draft.name)}${field('每组重复次数', 'repeats', draft.repeats, 'number', 'min="1" max="10"')}</div><div class="grid three">${playerCards(true)}</div><p class="muted">需要自定义风格？在「玩家配置库」描述、推荐并保存，再回到这里选择。</p></section>
-  <section class="panel"><div class="panel-header"><h2>场景设计 <small>Scenario design</small></h2><span class="muted">先预览、再校验，执行前保留完整快照</span></div><div class="split"><div>${area('描述实验要求', 'requirements', draft.requirements)}${imagePicker('scenarios')}<div class="grid">${field('生成数量', 'scenario-count', draft.count, 'number', 'min="1" max="100"')}<label class="field">已有场景街道筛选<select id="fixture-stage">${options([{ value: 'all', label: '全部街道' }, ...['preflop', 'flop', 'turn', 'river'].map((s) => ({ value: s, label: stages[s] }))])}</select></label></div>${scenarioBatches.controls()}<div class="actions">${button('预览分批计划与提示词', 'preview-scenarios', true)}${button('AI 分批生成场景', 'generate-scenarios')}${button('使用代表路线', 'use-representative', true)}${button('选用内置场景', 'use-existing', true)}<a class="chip" href="#library">从场景库选用 →</a></div></div><aside class="aside-panel"><h3>一组场景，多种风格</h3><p>所有玩家使用相同底牌、公共牌和历史，只改变当前决策玩家的策略档位。</p><p>先比较概率、EV 与动作尺寸，再让大模型解释差异。</p><p>${boot.settings.keys[boot.settings.model.provider] ? '● 大模型密钥已配置' : '○ 请先配置大模型密钥'}<br>${boot.settings.solverConfigured ? '● Solver 地址已配置' : '○ 请在 .env 配置 solver 地址'}</p><a href="#settings">管理模型与提示词 →</a></aside></div></section>
-  <section id="scenario-batch-panel" class="panel">${scenarioBatches.view()}</section><section class="panel"><div class="panel-header"><h2>场景预览 <small>${draft.fixtures.length} routes</small></h2>${button('校验全部路线', 'validate-routes', true)}</div><p class="muted">f 弃牌 / c 跟注 / x 过牌 / r 加注到 / b 下注 / @ 发公共牌。BTN=0、SB=1、BB=2、UTG=3、HJ=4、CO=5。</p>${routeCards()}<details><summary>批量 JSON 编辑 / 导入</summary>${area('场景数组', 'fixtures-json', pretty(draft.fixtures), true)}${button('应用 JSON', 'apply-json', true)}</details><div class="actions">${button('保存实验并查看请求计划', 'create-experiment')}<span class="hint">${draft.fixtures.length} 场景 × ${selectedPlayers().length} 玩家 × ${draft.repeats} 次 = ${draft.fixtures.length * selectedPlayers().length * draft.repeats} 次 solver 请求</span></div></section>`
+  return setup.view()
+}
+function historyRows() {
+  const rows = experiments.filter(
+    (m) =>
+      (!historyStatus || m.status === historyStatus) &&
+      (!historySearch ||
+        `${m.name} ${m.id} ${m.players.map((p) => p.label).join(' ')}`
+          .toLowerCase()
+          .includes(historySearch.toLowerCase()))
+  )
+  return rows.length
+    ? `<div class="table-wrap"><table><thead><tr><th>实验</th><th>创建时间（上海）</th><th>场景 / 玩家</th><th>进度</th><th>状态</th><th></th></tr></thead><tbody>${rows.map((m) => `<tr><td>${e(m.name)}<small>${e(m.id.slice(0, 8))}</small></td><td>${date(m.createdAt)}</td><td>${m.fixtures.length} / ${m.players.length}</td><td>${m.completed}/${m.total}<small>${m.successful} 成功</small></td><td><span class="badge">${statuses[m.status] ?? m.status}</span></td><td>${button('查看结果', 'open-experiment', true, `data-id="${e(m.id)}"`)}</td></tr>`).join('')}</tbody></table></div>`
+    : '<div class="empty">没有匹配的实验记录。</div>'
 }
 function history() {
-  return `<section class="panel"><div class="panel-header"><h2>实验记录</h2>${button('刷新', 'refresh-experiments', true)}</div>${experiments.length ? `<div class="table-wrap"><table><thead><tr><th>实验</th><th>创建时间（上海）</th><th>场景 / 玩家</th><th>进度</th><th>状态</th><th></th></tr></thead><tbody>${experiments.map((m) => `<tr><td>${e(m.name)}<small>${e(m.id.slice(0, 8))}</small></td><td>${date(m.createdAt)}</td><td>${m.fixtures.length} / ${m.players.length}</td><td>${m.completed}/${m.total}<small>${m.successful} 成功</small></td><td><span class="badge">${statuses[m.status]}</span></td><td>${button('查看结果', 'open-experiment', true, `data-id="${e(m.id)}"`)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">还没有 Web 实验。可从新建实验开始。</div>'}</section>`
+  return `<section class="panel"><div class="panel-header"><h2>实验记录</h2>${button('刷新', 'refresh-experiments', true)}</div><div class="setup-history-filters">${field('搜索名称、玩家或实验编号', 'history-search', historySearch)}<label class="field">实验状态<select id="history-status"><option value="">全部状态</option>${Object.entries(
+    statuses
+  )
+    .map(
+      ([id, label]) =>
+        `<option value="${id}" ${historyStatus === id ? 'selected' : ''}>${label}</option>`
+    )
+    .join(
+      ''
+    )}</select></label></div><div id="experiment-history-list">${historyRows()}</div></section>`
 }
 function results() {
   if (!detail) {
-    return '<div class="empty">从实验记录选择一个实验。</div>'
+    return `<section class="panel prepare-empty"><h2>尚未选择实验</h2><p>从实验记录选择一项，或新建实验并开始对比。</p>${button('选择实验', 'experiment-tab', false, 'data-tab="history"')}</section>`
   }
   const { meta: m, data, analysis } = detail
   const busy = m.status === 'running'
-  return `<section class="panel"><div class="panel-header"><div><h2>${e(m.name)} <small>${statuses[m.status]}</small></h2><span class="muted">${date(m.createdAt)} · 基线 ${e(m.players.find((p) => p.id === m.baselineId)?.label)}</span></div><a class="chip" href="/api/experiments/${m.id}/report.html" target="_blank" rel="noopener">打开 / 导出 HTML ↗</a></div><p>${e(m.requirements)}</p><div class="wb-experiment-meta"><span>6 人桌</span><span>初始 100BB</span><span>无前注 · 无抓注</span><span>${data.totalScenes} 条行动线</span><span>${data.styles.length} 个玩家配置</span><span>每组重复 ${data.repeats} 次</span></div></section><div data-comparison data-run-id="${e(m.id)}">${comparisonOverview(data)}<section class="panel wb-analysis-panel"><h2>执行与数据</h2><div class="progress"><progress max="${m.total}" value="${m.completed}"></progress></div>${m.problem ? `<p class="error">${e(m.problem)}</p>` : ''}<div class="actions">${button(busy ? '正在求解…' : m.completed ? '继续未完成请求' : `执行 ${m.total} 次 solver 请求`, 'execute-experiment', false, busy ? 'disabled' : '')}${button('重试失败项', 'retry-experiment', true, busy ? 'disabled' : '')}${button('离线重建报告', 'render-experiment', true, busy ? 'disabled' : '')}${button('复制为新实验', 'clone-experiment', true)}${button('刷新状态', 'refresh-detail', true)}</div><p class="muted">成功缓存始终复用。只有点击执行才发送 solver 请求；报告和结论分析可以独立重跑。</p><details><summary>不可变请求计划与原始数据</summary><p><a href="/api/experiments/${m.id}/raw/session.json" target="_blank" rel="noopener">场景与请求计划 JSON</a> · <a href="/api/experiments/${m.id}/raw/validation.json" target="_blank" rel="noopener">合法性校验</a> · <a href="/api/experiments/${m.id}/raw/horizontal.json" target="_blank" rel="noopener">横向结果</a></p><pre>${e(pretty(m.players))}</pre></details></section>
-  ${comparisonSummary(data)}
-  <section class="panel wb-analysis-panel"><div class="panel-header"><h2>大模型结论 <small>${e(boot.settings.model.provider)} / ${e(boot.settings.model.model)}</small></h2><div class="actions">${button('预览分析提示词', 'preview-analysis', true, busy ? 'disabled' : '')}${button('生成 / 重新分析', 'analyze-experiment', false, busy || !data.successful ? 'disabled' : '')}</div></div><p class="muted">使用已保存的 solver 结果，每次分析单独留存提示词、模型、输入与原始输出。</p>${analysis ? `<div class="analysis-text">${e(analysis.summary)}</div>${analysis.scenes.map((s) => `<div class="callout"><strong>${e(s.id)}</strong><p>${e(s.conclusion)}</p></div>`).join('')}<p>${analysis.limitations.map(e).join('；')}</p>` : `<div class="empty">${detail.analysisStale ? '求解结果已更新，历史分析已过期，请重新分析。旧版本仍可查看。' : '尚未生成分析。solver 数据足够后，可独立运行此步骤。'}</div>`}<details><summary>历史分析版本</summary>${m.analysisIds.map((id) => `<p><a href="/api/calls/${id}/request" target="_blank" rel="noopener">${e(id)} · 完整提示词</a> · <a href="/api/calls/${id}/result" target="_blank" rel="noopener">分析结果</a></p>`).join('') || '<p>暂无记录</p>'}</details></section>
-  ${comparisonDetails(data, { experimentId: m.id })}</div>`
+  const overview = resultView === 'overview' ? comparisonOverview(data) : ''
+  const compare =
+    resultView === 'compare'
+      ? comparisonSummary(data) + comparisonDetails(data, { experimentId: m.id })
+      : ''
+  const ai =
+    resultView === 'analysis'
+      ? `<section class="panel wb-analysis-panel"><div class="panel-header"><h2>大模型结论 <small>${e(boot.settings.model.provider)} / ${e(boot.settings.model.model)}</small></h2><div class="actions">${button('预览分析提示词', 'preview-analysis', true, busy ? 'disabled' : '')}${button('生成 / 重新分析', 'analyze-experiment', false, busy || !data.successful ? 'disabled' : '')}</div></div><p class="muted">只分析已保存的 solver 结果，分析请求独立留存。</p>${analysis ? `<div class="analysis-text">${e(analysis.summary)}</div>${analysis.scenes.map((scene) => `<div class="callout"><strong>${e(scene.id)}</strong><p>${e(scene.conclusion)}</p></div>`).join('')}<p>${analysis.limitations.map(e).join('；')}</p>` : `<div class="empty">${detail.analysisStale ? '求解结果已更新，请重新分析；旧版本仍保留。' : '尚未生成分析，获得 solver 结果后可独立运行。'}</div>`}<details><summary>历史分析版本</summary>${m.analysisIds.map((id) => `<p><a href="/api/calls/${id}/request" target="_blank" rel="noopener">${e(id)} · 提示词</a> · <a href="/api/calls/${id}/result" target="_blank" rel="noopener">分析结果</a></p>`).join('') || '<p>暂无记录</p>'}</details></section>`
+      : ''
+  const raw =
+    resultView === 'raw'
+      ? `<section class="panel"><h2>执行与原始数据</h2><div class="actions">${button('重试失败项', 'retry-experiment', true, busy ? 'disabled' : '')}${button('离线重建报告', 'render-experiment', true, busy ? 'disabled' : '')}</div><p>成功结果始终复用；离线重建不请求 solver。</p><p><a href="/api/experiments/${m.id}/raw/session.json" target="_blank" rel="noopener">场景与不可变请求计划 JSON</a> · <a href="/api/experiments/${m.id}/raw/validation.json" target="_blank" rel="noopener">合法性校验</a> · <a href="/api/experiments/${m.id}/raw/horizontal.json" target="_blank" rel="noopener">横向结果 JSON</a></p><details><summary>玩家配置快照</summary><pre>${e(pretty(m.players))}</pre></details><p>逐次原始响应在“场景对比 → 场景详情”中查看。</p></section>`
+      : ''
+  return `<section class="panel setup-result-heading"><div class="panel-header"><div><h2>${e(m.name)} <small>${statuses[m.status]}</small></h2><span class="muted">${date(m.createdAt)} · 实验 ${e(m.id.slice(0, 8))} · 基线 ${e(m.players.find((p) => p.id === m.baselineId)?.label)}</span></div><a class="chip" href="/api/experiments/${m.id}/report.html" target="_blank" rel="noopener">打开 / 导出 HTML ↗</a></div><div class="setup-result-progress"><strong>${m.completed} / ${m.total} 次已完成 · ${m.successful} 次成功</strong><div class="progress"><progress max="${m.total}" value="${m.completed}"></progress></div><div class="actions">${button(busy ? '正在求解…' : m.completed === m.total && m.successful === m.total ? '已全部完成' : m.completed ? '继续未完成请求' : `执行 ${m.total} 次 solver 请求`, 'execute-experiment', false, busy || (m.completed === m.total && m.successful === m.total) ? 'disabled' : '')}${button('刷新状态', 'refresh-detail', true)}${button('复制为新实验', 'clone-experiment', true)}</div></div>${m.problem ? `<p class="error">${e(m.problem)}</p>` : ''}<p class="muted">${data.styles.length} 个玩家 · ${data.totalScenes} 条场景 · 每组重复 ${data.repeats} 次 · 6 人 / 100BB / 无前注、无抓注</p></section><div class="tabbar setup-result-tabs">${[
+    ['overview', '总体结论'],
+    ['compare', '场景对比'],
+    ['analysis', 'AI 分析'],
+    ['raw', '原始数据'],
+  ]
+    .map(([id, label]) => button(label, 'result-tab', resultView !== id, `data-view="${id}"`))
+    .join(
+      ''
+    )}</div><div data-comparison data-run-id="${e(m.id)}">${overview}${compare}${ai}${raw}</div>`
 }
 function experimentPage() {
   return (
+    '<div class="experiment-shell">' +
     header(
       '玩家风格实验工作台',
       '从风格描述到策略证据，让每次对比都有据可查。',
@@ -539,12 +671,23 @@ function experimentPage() {
       ? newExperiment()
       : experimentTab === 'history'
         ? history()
-        : results())
+        : results()) +
+    '</div>'
   )
 }
 function playersPage() {
+  const tabs = `<div class="tabbar">${button('内置角色库 · 75', 'players-tab', playersTab !== 'roles', 'data-tab="roles"')}${button('我的玩家配置', 'players-tab', playersTab !== 'mine', 'data-tab="mine"')}</div>`
+  if (playersTab === 'roles') {
+    return (
+      header('玩家配置库', '从内置角色开始，或维护自己的玩家配置。', metricsHelpButton()) +
+      tabs +
+      `<div id="role-library">${roleLibrary.view()}</div>`
+    )
+  }
+  playerEditorSource = undefined
   return (
     header('玩家配置库', '用自然语言描述风格，或直接组合翻前和翻后档位。', metricsHelpButton()) +
+    tabs +
     `<section class="panel"><h2>描述一个玩家 <small>AI assisted configuration</small></h2>${area('玩家描述', 'player-description', '翻前很松，喜欢跟注和跛入，很少主动加注；翻后偏被动，愿意跟到底。')}${imagePicker('player')}<div class="actions">${button('预览推荐提示词', 'preview-player', true)}${button('AI 推荐档位', 'recommend-player')}</div>${playerRecommendation ? `<div class="callout"><strong>${e(playerRecommendation.label)}</strong><p>${e(playerRecommendation.description)}</p><code>${e(playerRecommendation.preflop)} / ${e(playerRecommendation.postflop)}</code><div class="actions">${button('填入编辑器', 'accept-player', true)}</div></div>` : ''}</section><section class="panel"><h2>已保存的玩家 <small>最多 8 个，可跨实验复用</small></h2><div class="grid three">${playerCards(false)}</div></section><section class="panel"><h2>玩家编辑器</h2><div class="grid">${field('唯一 ID（字母、数字、连字符）', 'player-id', 'custom-player')}${field('玩家名称', 'player-label', '自定义玩家')}</div>${area('风格说明 / 推荐理由', 'player-summary', '描述此配置的风格和观察目标。')}<div class="grid">${profileSelect('preflop', 'player-preflop', 'gto')}${profileSelect('postflop', 'player-postflop', 'gto')}</div><div id="player-metrics"></div><div class="actions">${button('保存玩家配置', 'save-player')}<span class="hint">相同 ID 更新配置；已有实验快照保持原值。</span></div></section>`
   )
 }
@@ -623,7 +766,11 @@ function render() {
     filterCatalog()
   }
   if (page === 'players') {
-    playerMetrics()
+    if (playersTab === 'mine') {
+      playerMetrics()
+    } else {
+      roleLibrary.mount()
+    }
   }
   if (page === 'settings') {
     modelInfo()
@@ -691,20 +838,8 @@ function capturePrompt() {
   }
 }
 function captureDraft() {
-  if (
-    page === 'experiment' &&
-    experimentTab === 'new' &&
-    draft &&
-    document.getElementById('experiment-name') &&
-    document.getElementById('requirements') &&
-    document.getElementById('scenario-count') &&
-    document.getElementById('repeats')
-  ) {
-    draft.name = val('experiment-name')
-    draft.requirements = val('requirements')
-    draft.count = Number(val('scenario-count'))
-    draft.repeats = Number(val('repeats'))
-    persist()
+  if (draft && page === 'experiment' && experimentTab === 'new') {
+    setup.capture()
   }
 }
 function inputFor(task: PromptTask) {
@@ -751,6 +886,7 @@ async function loadHistory() {
   experiments = await api('/experiments')
 }
 function fillPlayer(p: PlayerConfig) {
+  playerEditorSource = p.sourceRole ? structuredClone(p.sourceRole) : undefined
   $('player-id').setAttribute('data-editing', p.id)
   for (const [id, value] of [
     ['player-id', p.id],
@@ -766,6 +902,15 @@ function fillPlayer(p: PlayerConfig) {
 }
 
 const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void>> = {
+  'players-tab': (b) => {
+    playersTab = b.dataset.tab!
+    render()
+  },
+  'browse-roles': () => {
+    captureDraft()
+    playersTab = 'roles'
+    location.hash = 'players'
+  },
   'retry-navigation': () => navigate(page),
   'reload-page': () => window.location.reload(),
   'table-create': () => tableExperience.create(),
@@ -850,6 +995,10 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
       throw error
     }
   },
+  'result-tab': (b) => {
+    resultView = b.dataset.view!
+    render()
+  },
   'experiment-tab': async (b) => {
     captureDraft()
     experimentTab = b.dataset.tab!
@@ -883,8 +1032,12 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
   'preview-player': () => preview('player'),
   'preview-analysis': () => preview('analysis'),
   'generate-scenarios': () => scenarioBatches.start(),
+  'batch-auto': () => {
+    setup.reportError('')
+    scenarioBatches.auto()
+  },
   'batch-history': () => scenarioBatches.loadHistory(),
-  'batch-open': (b) => scenarioBatches.open(b.dataset.id!),
+  'batch-open': (b) => setup.followBatch(b.dataset.id!),
   'batch-apply': () => scenarioBatches.apply(),
   'batch-resume': () => scenarioBatches.resume(),
   'batch-retry': (b) => scenarioBatches.resume(Number(b.dataset.index)),
@@ -940,6 +1093,70 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
     render()
     notice('全部路线合法，可保存实验')
   },
+  'start-comparison': async () => {
+    if (experimentStarting) {
+      return
+    }
+    captureDraft()
+    if (!draft.name.trim()) {
+      setup.setProblem('请先填写实验名称')
+      return
+    }
+    if (!selectedPlayers().length || !draft.fixtures.length) {
+      setup.setProblem('请添加对比玩家和场景')
+      return
+    }
+    experimentStarting = true
+    render()
+    const signature = draftSignature()
+    const snapshot = structuredClone({
+      name: draft.name,
+      requirements:
+        draft.requirements.trim() ||
+        `对比 ${selectedPlayers()
+          .map((p) => p.label)
+          .join('、')} 在 ${draft.fixtures.length} 条相同行动路线中的策略表现。`,
+      players: selectedPlayers(),
+      fixtures: draft.fixtures,
+      repeats: draft.repeats,
+    })
+    let savedId: string | null = null
+    try {
+      const checked = await api<{
+        fixtures: ScenarioFixture[]
+        validation: ((typeof validation)[string] & { id: string })[]
+      }>('/scenarios/validate', { fixtures: snapshot.fixtures })
+      captureDraft()
+      if (signature !== draftSignature()) {
+        throw new Error('草稿已变化，请核对后重新开始')
+      }
+      validation = Object.fromEntries(checked.validation.map((v) => [v.id, v]))
+      const meta = await api<ExperimentMeta>('/experiments', {
+        ...snapshot,
+        fixtures: checked.fixtures,
+      })
+      savedId = meta.id
+      detail = await api(`/experiments/${meta.id}`)
+      experimentTab = 'result'
+      resultView = 'overview'
+      render()
+      await api(`/experiments/${meta.id}/execute`, {})
+      await refreshDetail()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '开始对比失败'
+      if (savedId) {
+        notice(`实验快照已保存；${message}。可从实验记录继续，不必重新创建。`)
+        await refreshDetail().catch(() => undefined)
+      } else {
+        setup.setProblem(message)
+      }
+    } finally {
+      experimentStarting = false
+      if (page === 'experiment' && experimentTab === 'new') {
+        render()
+      }
+    }
+  },
   'create-experiment': async () => {
     captureDraft()
     const meta = await api<ExperimentMeta>('/experiments', {
@@ -955,6 +1172,7 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
     notice(`请求计划已保存：${meta.total} 次。点击执行开始求解。`)
   },
   'open-experiment': async (b) => {
+    resultView = 'overview'
     detail = await api(`/experiments/${b.dataset.id}`)
     experimentTab = 'result'
     render()
@@ -987,7 +1205,13 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
       count: m.fixtures.length,
       fixtures: structuredClone(m.fixtures),
       playerIds: m.players.map((p) => p.id),
+      rolePlayers: m.players
+        .filter((p) => p.sourceRole && !boot.settings.players.some((saved) => saved.id === p.id))
+        .map((p) => structuredClone(p)),
     }
+    draft.key = emptyExperimentDraft().key
+    scenarioBatches.detach()
+    setup.detached()
     experimentTab = 'new'
     validation = {}
     persist()
@@ -1006,8 +1230,12 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
       description: val('player-summary'),
       preflop: val('player-preflop'),
       postflop: val('player-postflop'),
+      ...(playerEditorSource ? { sourceRole: structuredClone(playerEditorSource) } : {}),
     }
-    const oldId = $('player-id').getAttribute('data-editing') || p.id
+    const oldId = $('player-id').getAttribute('data-editing')
+    if (boot.settings.players.some((saved) => saved.id === p.id && saved.id !== oldId)) {
+      throw new Error('该 ID 已被其他玩家使用，请使用新的唯一 ID，或点击该玩家的编辑按钮')
+    }
     const players = boot.settings.players.filter((v) => v.id !== oldId && v.id !== p.id).concat(p)
     boot.settings = await api('/settings', { players })
     render()
@@ -1021,6 +1249,28 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
     draft.playerIds = draft.playerIds.filter((p) => p !== id)
     persist()
     render()
+  },
+  'remove-draft-role': (b) => {
+    const id = b.dataset.id!
+    if (!draftPlayers().some((p) => p.id === id)) {
+      throw new Error('该玩家不在当前草稿中')
+    }
+    captureDraft()
+    if (boot.settings.players.some((p) => p.id === id)) {
+      draft.hiddenPlayerIds = [...new Set([...(draft.hiddenPlayerIds ?? []), id])]
+    }
+    draft.rolePlayers = draft.rolePlayers?.filter((p) => p.id !== id)
+    draft.playerIds = draft.playerIds.filter((p) => p !== id)
+    persist()
+    render()
+    notice('已从当前草稿移除角色；内置库、个人玩家配置和历史实验保持不变')
+  },
+  'restore-draft-players': () => {
+    captureDraft()
+    draft.hiddenPlayerIds = []
+    persist()
+    render()
+    notice('已恢复个人玩家卡片，请勾选需要参与本次实验的玩家')
   },
   'catalog-prev': () => {
     catalogPage--
@@ -1121,6 +1371,21 @@ const actions: Record<string, (button: HTMLButtonElement) => void | Promise<void
 }
 
 document.addEventListener('click', (event) => {
+  const sceneLink = (event.target as HTMLElement).closest<HTMLAnchorElement>('a[href^="#scene-"]')
+  if (
+    sceneLink &&
+    page === 'experiment' &&
+    experimentTab === 'result' &&
+    resultView !== 'compare'
+  ) {
+    event.preventDefault()
+    resultView = 'compare'
+    render()
+    document
+      .getElementById(sceneLink.getAttribute('href')!.slice(1))
+      ?.scrollIntoView({ block: 'start' })
+    return
+  }
   const nav = (event.target as HTMLElement).closest<HTMLAnchorElement>('nav a[data-page]')
   if (
     nav &&
@@ -1147,15 +1412,27 @@ document.addEventListener('click', (event) => {
     return
   }
   const action = actions[b.dataset.action!]
-  if (!action) {
+  const roleAction = b.dataset.action!.startsWith('role-')
+  const setupAction = b.dataset.action!.startsWith('setup-')
+  if (!action && !roleAction && !setupAction) {
     return
   }
   const label = b.textContent
   b.disabled = true
   b.textContent = '处理中…'
   void Promise.resolve()
-    .then(() => action(b))
-    .catch((error: unknown) => notice(error instanceof Error ? error.message : '操作失败'))
+    .then(() =>
+      setupAction
+        ? setup.click(b.dataset.action!, b)
+        : roleAction
+          ? roleLibrary.click(b.dataset.action!, b)
+          : action(b)
+    )
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : '操作失败'
+      setup.reportError(message)
+      notice(message)
+    })
     .finally(() => {
       b.disabled = false
       b.textContent = label
@@ -1171,8 +1448,33 @@ app.addEventListener(
   },
   true
 )
-app.addEventListener('change', (event) => {
+document.addEventListener('change', (event) => {
   const input = event.target as HTMLInputElement
+  if (input.id.startsWith('batch-')) {
+    setup.reportError('')
+    scenarioBatches.update(input)
+    return
+  }
+  if (input.id === 'scenario-count' || input.id === 'requirements') {
+    setup.reportError('')
+    captureDraft()
+    scenarioBatches.update()
+    persist()
+    return
+  }
+  if (input.id === 'history-status') {
+    historyStatus = input.value
+    $('experiment-history-list').innerHTML = historyRows()
+    return
+  }
+  if (input.id.startsWith('setup-') || input.dataset.setupPlayer || input.dataset.setupScene) {
+    setup.change(input)
+    return
+  }
+  if (input.id.startsWith('role-') || input.dataset.roleCompare) {
+    roleLibrary.change(input)
+    return
+  }
   if (input.id.startsWith('table-')) {
     tableExperience.changed()
     return
@@ -1254,7 +1556,30 @@ app.addEventListener('change', (event) => {
   }
   captureDraft()
 })
-app.addEventListener('input', (event) => {
+document.addEventListener('input', (event) => {
+  const input = event.target as HTMLInputElement
+  if (input.id === 'history-search') {
+    historySearch = input.value
+    $('experiment-history-list').innerHTML = historyRows()
+    return
+  }
+  if (input.id.startsWith('setup-')) {
+    setup.change(input)
+    return
+  }
+  if (['experiment-name', 'requirements', 'scenario-count'].includes(input.id)) {
+    captureDraft()
+    if (input.id === 'scenario-count' || input.id === 'requirements') {
+      setup.reportError('')
+      scenarioBatches.update()
+    }
+    persist()
+    return
+  }
+  if ((event.target as HTMLElement).id === 'role-search') {
+    roleLibrary.change(event.target as HTMLInputElement)
+    return
+  }
   if ((event.target as HTMLElement).id === 'library-search') {
     scenarioLibrary.filter()
     return
@@ -1299,43 +1624,27 @@ window.addEventListener('beforeunload', captureDraft)
 async function start() {
   boot = await api<Boot>('/bootstrap')
   promptDrafts = structuredClone(boot.settings.prompts)
-  draft = {
-    name: '玩家风格代表性对比',
-    requirements:
-      '覆盖翻前边缘牌面对再加注、翻牌组合听牌与河牌抓诈唬，比较松弱、紧凶和 GTO 的概率、尺寸与 EV 差异。',
-    count: 3,
-    repeats: 2,
-    playerIds: boot.settings.players.map((p) => p.id),
-    fixtures: structuredClone(boot.fixtures.filter((f) => /^S\d+$/.test(f.id))),
-  }
+  draft = emptyExperimentDraft()
   try {
-    const saved = localStorage.getItem('strategy-lab-draft-v1')
-    if (saved) {
-      const parsed = JSON.parse(saved) as Draft
-      if (
-        Array.isArray(parsed.fixtures) &&
-        parsed.fixtures.length <= 100 &&
-        parsed.fixtures.every(
-          (f) =>
-            f &&
-            typeof f.id === 'string' &&
-            typeof f.cards === 'string' &&
-            typeof f.line === 'string' &&
-            typeof f.description === 'string' &&
-            typeof f.category === 'string' &&
-            typeof f.history === 'string' &&
-            ['preflop', 'flop', 'turn', 'river'].includes(f.street) &&
-            Number.isInteger(f.hero) &&
-            f.hero >= 0 &&
-            f.hero <= 5
-        ) &&
-        Array.isArray(parsed.playerIds)
-      ) {
-        draft = { ...draft, ...parsed }
+    const parse = (raw: string | null) => {
+      try {
+        return raw ? readExperimentDraft(JSON.parse(raw)) : null
+      } catch {
+        return null
       }
     }
+    const recent = parse(localStorage.getItem('strategy-lab-draft-v1'))
+    const backup = parse(localStorage.getItem('strategy-lab-previous-draft-v1'))
+    recoverableDraft =
+      recent &&
+      (recent.playerIds.length || recent.fixtures.length || recent.name || recent.requirements)
+        ? recent
+        : backup
+    if (recoverableDraft) {
+      localStorage.setItem('strategy-lab-previous-draft-v1', pretty(recoverableDraft))
+    }
   } catch {
-    /* 使用默认草稿 */
+    /* The blank workspace remains usable without local storage. */
   }
   page = ['experiment', 'players', 'library', 'catalog', 'settings', 'table'].includes(
     location.hash.slice(1)
@@ -1343,9 +1652,7 @@ async function start() {
     ? location.hash.slice(1)
     : 'experiment'
   render()
-  void scenarioBatches
-    .restore()
-    .catch((error: unknown) => notice(error instanceof Error ? error.message : '无法恢复分批任务'))
+
   try {
     const savedJob = localStorage.getItem('strategy-lab-model-job')
     if (savedJob) {

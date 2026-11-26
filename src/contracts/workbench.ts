@@ -71,6 +71,7 @@ export interface PlayerConfig {
   description: string
   preflop: string
   postflop: string
+  sourceRole?: { id: string; version: string }
 }
 export interface PromptVersion {
   id: string

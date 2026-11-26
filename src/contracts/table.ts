@@ -52,6 +52,7 @@ export interface TableRun {
   stacks: number[]
   rebuys: number[]
   stats: TableStatistics
+  statsNotice?: string
   events: (TableEvent & { hand: number })[]
   recentHands: { number: number; board: string[]; profit: number[]; winners: number[] }[]
   lastDecision: { requestId: string; actionIndex: number; elapsedMs: number } | null

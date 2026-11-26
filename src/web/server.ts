@@ -205,7 +205,7 @@ export function createWebHandler(
             path === '/'
               ? Bun.file(resolve(publicRoot, 'index.html'))
               : path === '/style.css'
-                ? `${await Bun.file(resolve(publicRoot, 'style.css')).text()}\n${comparisonCss}\n${await Bun.file(resolve(publicRoot, 'table.css')).text()}`
+                ? `${await Bun.file(resolve(publicRoot, 'style.css')).text()}\n${comparisonCss}\n${await Bun.file(resolve(publicRoot, 'table.css')).text()}\n${await Bun.file(resolve(publicRoot, 'roles.css')).text()}\n${await Bun.file(resolve(publicRoot, 'preparation.css')).text()}`
                 : appScript
                   ? typeof appScript === 'string'
                     ? Bun.file(appScript)

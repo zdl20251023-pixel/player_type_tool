@@ -260,9 +260,9 @@ export class Workbench {
       input,
       thinking:
         task === 'scenarios'
-          ? obj.thinking === 'enabled'
-            ? ('enabled' as const)
-            : ('disabled' as const)
+          ? obj.thinking === 'disabled'
+            ? ('disabled' as const)
+            : ('enabled' as const)
           : undefined,
       ...rendered,
       experimentId: task === 'analysis' ? String(obj.experimentId) : null,

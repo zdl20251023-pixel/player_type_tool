@@ -77,7 +77,7 @@ export class TableUI {
     return `<aside class="panel table-settings"><h2>牌桌设置</h2><p class="muted">6 人 · 初始 100BB · 0.5/1BB · 无前注、无抓注、无抽水。座位固定，位置每手轮转。</p><div class="actions">${this.button('开始新体验（真实 solver）', 'create', Boolean(busy))}${this.button('保存设置／下手生效', 'configure', !this.run)}</div><label class="field">运行模式<select id="table-mode"><option value="watch" ${c.mode === 'watch' ? 'selected' : ''}>观看模式 · 动画与行动延迟</option><option value="fast" ${c.mode === 'fast' ? 'selected' : ''}>快速模式 · 无动画、无等待</option></select></label><div class="table-seat-selectors">${c.seats.map((p, i) => `<label class="field">座位 ${i + 1}（首手 ${['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO'][i]}）<select id="table-seat-${i}">${[...this.host.players(), ...(!this.host.players().some((o) => o.id === p.id) ? [p] : [])].map((o) => `<option value="${e(o.id)}" ${o.id === p.id ? 'selected' : ''}>${e(o.label)} · ${e(o.preflop)} / ${e(o.postflop)}</option>`).join('')}</select></label>`).join('')}</div>${field('hands', '目标手数（最高 1 亿手）', c.hands ?? 100, 1, 100000000)}${check('continuous', '观看时持续运行，直到手动停止', c.hands === null)}<label class="field">行动延迟（秒）<select id="table-action-delay">${[0, 1, 2, 3, 5, 10, 30, 60].map((n) => `<option value="${n}" ${c.actionDelayMs === n * 1000 ? 'selected' : ''}>${n} 秒</option>`).join('')}<option value="custom" ${![0, 1, 2, 3, 5, 10, 30, 60].includes(c.actionDelayMs / 1000) ? 'selected' : ''}>自定义</option></select></label><label class="field" id="table-custom-delay-field" ${[0, 1, 2, 3, 5, 10, 30, 60].includes(c.actionDelayMs / 1000) ? 'hidden' : ''}>自定义行动延迟（秒）<input id="table-action-custom" type="number" min="0" max="60" step="0.1" value="${c.actionDelayMs / 1000}"></label>${field('hand-delay', '每手结算后等待（秒）', c.handDelayMs / 1000, 0, 60)}${check('auto-next', '观看时自动开始下一手', c.autoNext)}${check('animations', '观看时播放牌桌动画', c.animations)}${check('rebuy', '筹码耗尽后自动补回 100BB', c.autoRebuy)}${field('seed', '随机种子（仅新体验可修改）', c.seed, 0, 4294967295)}<p class="muted">快速模式忽略所有展示等待。仍逐次请求真实 solver；耗时取决于接口与本地存盘。固定六人，无并行桌和静默随机代打。</p><p class="muted">玩家类型下手生效；节奏设置作用于后续等待。原始请求与响应先保存，再推进动作。异常默认暂停。</p></aside>`
   }
   view() {
-    return `<div class="table-experience"><div><section id="table-live" class="panel table-view"><div id="table-status">${this.status()}</div><div id="table-surface">${this.surface()}</div></section><section id="table-metrics" class="panel">${this.metrics()}</section><section class="panel"><div class="panel-header"><h2>体验记录</h2>${this.button('刷新记录', 'history')}</div><div id="table-history">${this.historyView()}</div></section></div><div id="table-settings">${this.settings()}</div></div>`
+    return `<div class="table-experience"><section id="table-live" class="panel table-view"><div id="table-status">${this.status()}</div><div id="table-surface">${this.surface()}</div></section><div id="table-settings">${this.settings()}</div><section id="table-metrics" class="panel table-statistics">${this.metrics()}</section><section class="panel table-session-history"><div class="panel-header"><h2>体验记录</h2>${this.button('刷新记录', 'history')}</div><div id="table-history">${this.historyView()}</div></section></div>`
   }
   private status() {
     const r = this.run,
@@ -113,28 +113,25 @@ export class TableUI {
         const actionText = p?.folded
           ? '已弃牌'
           : onTurn
-            ? r?.status === 'running'
-              ? '行动中'
-              : '待行动'
-            : p?.lastAction || '等待行动'
+            ? '待行动'
+            : p?.stack === 0 && !h?.complete
+              ? '全下'
+              : (/^(全下|跟注|下注|加注|过牌)/.exec(p?.lastAction ?? '')?.[1] ?? '未行动')
         const actionKind = p?.folded
           ? 'fold'
           : onTurn
             ? 'pending'
-            : /^全下/.test(actionText)
+            : actionText === '全下'
               ? 'allin'
               : /^(下注|加注)/.test(actionText)
                 ? 'aggressive'
-                : /^跟注/.test(actionText)
+                : actionText === '跟注'
                   ? 'call'
-                  : /^过牌/.test(actionText)
+                  : actionText === '过牌'
                     ? 'check'
                     : 'waiting'
-        const positionName = ({ BTN: '庄家', SB: '小盲', BB: '大盲' } as Record<string, string>)[
-          position
-        ]
 
-        return `<article class="table-seat seat-${seat} ${p?.folded ? 'folded' : ''} ${h?.actor === seat ? 'acting' : ''} ${won ? 'winner' : ''} ${animate && event?.type === 'action' && event.seat === seat ? 'acted' : ''}" aria-label="座位 ${seat + 1} · ${e(config.label)} · ${position}"><span class="table-position" data-position="${position}">${position}${positionName ? `<small>${positionName}</small>` : ''}</span><div class="table-seat-head"><div class="table-avatar avatar-tone-${seat}" role="img" aria-label="${e(config.label)}玩家头像"><svg viewBox="0 0 64 64" aria-hidden="true"><path class="avatar-shoulders" d="M5 64c0-16 10-24 27-24s27 8 27 24Z"/><path class="avatar-neck" d="M25 34h14v13l-7 6-7-6Z"/><ellipse class="avatar-face" cx="32" cy="26" rx="13" ry="16"/><path class="avatar-hair" d="M18 27c-5-21 26-26 28-8l-1 9-5-11c-6 5-13 4-18 1l-2 11Z"/></svg><span class="table-seat-number">${seat + 1}</span>${h?.button === seat ? '<span class="table-dealer" title="庄家">D</span>' : ''}${won ? '<span class="table-winner-badge" title="本手赢家">♛</span>' : ''}</div><div class="table-hole">${[0, 1].map((i) => this.card(p?.cards[i], Boolean(animate && h?.actions === 0 && h.street === 0))).join('')}</div></div><div class="table-nameplate"><div class="table-player-name"><b>${e(config.label)}</b></div><strong class="table-stack">${bb(p?.stack ?? 10000)} <small>BB</small></strong></div><div class="table-front"><span class="table-player-action" data-action-kind="${actionKind}">${p?.folded ? '<i aria-hidden="true">×</i> ' : ''}${e(actionText)}</span>${p?.streetContribution && !h?.complete ? `<span class="table-wager" title="本街累计投入，已计入底池"><i aria-hidden="true"></i><b>${bb(p.streetContribution)}</b> BB</span>` : ''}${won ? `<span class="table-award">赢得 ${bb(h!.awards[seat])} BB</span>` : ''}</div></article>`
+        return `<article class="table-seat seat-${seat} ${p?.folded ? 'folded' : ''} ${onTurn ? 'acting' : ''} ${won ? 'winner' : ''} ${animate && event?.type === 'action' && event.seat === seat ? 'acted' : ''}" aria-label="座位 ${seat + 1} · ${e(config.label)} · ${position}"><div class="table-seat-head"><div class="table-avatar avatar-tone-${seat}"><span class="table-position" data-position="${position}">${position}</span><svg role="img" aria-label="${e(config.label)}玩家头像" viewBox="0 0 64 64"><path class="avatar-shoulders" d="M5 64c0-16 10-24 27-24s27 8 27 24Z"/><path class="avatar-neck" d="M25 34h14v13l-7 6-7-6Z"/><ellipse class="avatar-face" cx="32" cy="26" rx="13" ry="16"/><path class="avatar-hair" d="M18 27c-5-21 26-26 28-8l-1 9-5-11c-6 5-13 4-18 1l-2 11Z"/></svg><span class="table-player-action" data-action-kind="${actionKind}">${e(actionText)}</span></div><div class="table-hole">${[0, 1].map((i) => this.card(p?.cards[i], Boolean(animate && h?.actions === 0 && h.street === 0))).join('')}</div></div><div class="table-nameplate"><div class="table-player-name"><b>${e(config.label)}</b></div><strong class="table-stack">${bb(p?.stack ?? 10000)} <small>BB</small></strong></div><div class="table-front">${p?.streetContribution && !h?.complete ? `<span class="table-wager" title="本街累计投入，已计入底池"><i aria-hidden="true"></i><b>${bb(p.streetContribution)}</b> BB</span>` : ''}${won ? `<span class="table-wager table-award" title="本手获奖金额"><i aria-hidden="true"></i><b>${bb(h!.awards[seat])}</b> BB</span>` : ''}</div></article>`
       }
     ).join(
       ''
@@ -193,7 +190,7 @@ export class TableUI {
     this.payout.cancel()
   }
   private statsTable(title: string, group: Record<string, TableStat>, kind: string) {
-    return `<h3>${title}</h3><div class="table-wrap"><table><thead><tr><th>${kind}</th><th>已发牌手数</th><th>翻前有效机会</th><th>VPIP</th><th>PFR</th><th>AF</th><th>WTSD</th><th>净赢 BB</th></tr></thead><tbody>${
+    return `<h3>${title}</h3><div class="table-wrap"><table><thead><tr><th>${kind}</th><th>玩家类型 · 已发牌手数</th><th>已发牌手数</th><th>翻前有效机会</th><th>VPIP</th><th>PFR</th><th>AF</th><th>WTSD</th><th>净赢 BB</th></tr></thead><tbody>${
       Object.entries(group)
         .map(([key, row]) => {
           const s = tableStatValues(row)
@@ -201,16 +198,23 @@ export class TableUI {
             kind === '座位'
               ? `座位 ${Number(key) + 1}`
               : kind === '玩家类型'
-                ? `${this.host.players().find((p) => p.id === key.split('|')[0])?.label ?? key.split('|')[0]} · ${key.split('|').slice(1).join(' / ')}`
+                ? `${[...new Set(Object.values(row.players ?? {}).map((p) => p.label))].join(' / ') || key.split('|')[0]} · ${key.split('|').slice(1).join(' / ')}`
                 : key
-          return `<tr><td>${e(label)}</td><td>${s.hands}</td><td>${s.opportunities}</td><td>${s.vpipPercent === '—' ? '—' : s.vpipPercent + '%'}</td><td>${s.pfrPercent === '—' ? '—' : s.pfrPercent + '%'}</td><td>${s.af}</td><td>${s.wtsdPercent === '—' ? '—' : s.wtsdPercent + '%'}</td><td>${s.profitBb}</td></tr>`
+          const players =
+            Object.values(row.players ?? {})
+              .map(
+                (p) =>
+                  `<span class="table-stat-player" title="${e(`翻前 ${p.preflop} / 翻后 ${p.postflop}`)}"><b>${e(p.label)}</b> · ${p.hands} 手</span>`
+              )
+              .join('') || '<span class="muted">历史类型未核实</span>'
+          return `<tr><td>${e(label)}</td><td class="table-stat-players">${players}</td><td>${s.hands}</td><td>${s.opportunities}</td><td>${s.vpipPercent === '—' ? '—' : s.vpipPercent + '%'}<small class="table-stat-count">${s.vpip} / ${s.opportunities} 手</small></td><td>${s.pfrPercent === '—' ? '—' : s.pfrPercent + '%'}<small class="table-stat-count">${s.pfr} / ${s.opportunities} 手</small></td><td title="(下注 ${s.bets} + 加注 ${s.raises}) / 跟注 ${s.calls}">${s.af}</td><td title="摊牌 ${s.showdowns} / 看过翻牌 ${s.sawFlop} 手">${s.wtsdPercent === '—' ? '—' : s.wtsdPercent + '%'}</td><td>${s.profitBb}</td></tr>`
         })
-        .join('') || '<tr><td colspan="8">尚无已结算样本</td></tr>'
+        .join('') || '<tr><td colspan="9">尚无已结算样本</td></tr>'
     }</tbody></table></div>`
   }
   private metrics() {
     const r = this.run
-    return `<h2>已结算样本统计</h2><p class="muted">VPIP/PFR 分母为实际获得翻前行动机会的手数，排除大盲 walk 与被迫盲注全下；每手最多计一次。AF=(翻后下注+加注)/跟注。WTSD 分母为看过翻牌的手数。盈亏扣除本手初始筹码，补充筹码不算赢利。</p>${this.statsTable('按位置', r?.stats.position ?? {}, '位置')}<details id="table-detail-stats"><summary>按固定座位与玩家类型查看</summary>${this.statsTable('按固定座位', r?.stats.seat ?? {}, '座位')}${this.statsTable('按玩家类型和档位', r?.stats.type ?? {}, '玩家类型')}</details><details id="table-detail-actions" open><summary>最近行动 · 按手牌查看（最近 20 手）</summary>${this.handHistory()}</details>${
+    return `<h2>已结算样本统计</h2><div class="table-stats-scope"><strong>仅当前选中的 Session · 已结算 ${r?.completed ?? 0} 手</strong><p>三种分组共用同一批已结算手牌、同一套公式；未结算手牌不计入，不合并其他 Session。</p>${r ? `<small>Session：${e(r.id)}</small>` : ''}</div>${r?.statsNotice ? `<p class="error">${e(r.statsNotice)}</p>` : ''}<p>位置（BTN / SB / BB 等）每手轮转，按位置会汇集不同固定座位的玩家；按固定座位则跟随该座位跨位置累计，因此两表同一行不应直接对应。玩家类型列来自每手结算时保存的配置，手数为各类型在该行的已发牌样本数；修改下手配置不会改写历史类型。</p><p class="muted">VPIP/PFR 分母为实际获得翻前行动机会的手数，排除大盲 walk 与被迫盲注全下；每手最多计一次，数值下方显示分子 / 分母。AF=(翻后下注+加注)/跟注。WTSD 分母为看过翻牌的手数。盈亏扣除本手初始筹码，补充筹码不算赢利。不同分组的原始计数总和一致，百分比不能直接相加或简单平均。</p>${this.statsTable('按轮转位置汇总（可能包含多种玩家类型）', r?.stats.position ?? {}, '位置')}<details id="table-detail-stats"><summary>按固定座位与玩家类型查看 · 同一 Session</summary>${this.statsTable('按固定座位汇总（跨轮转位置）', r?.stats.seat ?? {}, '座位')}${this.statsTable('按玩家类型和档位', r?.stats.type ?? {}, '玩家类型')}</details><details id="table-detail-actions" open><summary>最近行动 · 按手牌查看（最近 20 手）</summary>${this.handHistory()}</details>${
       r
         ? `<details id="table-detail-raw"><summary>最近结算与完整原始日志</summary>${r.recentHands
             .slice()
@@ -388,6 +392,7 @@ export class TableUI {
       this.run?.hand?.complete,
       this.handReviewRevision,
       this.logFiles,
+      this.run?.statsNotice,
     ])
     if (metrics && metricsRevision !== this.metricsRevision) {
       const logScroll = metrics.querySelector('.table-hand-list')?.scrollTop ?? 0
@@ -448,6 +453,31 @@ export class TableUI {
     localStorage.setItem('strategy-lab-table', this.run.id)
     this.paint(true)
     this.watch()
+  }
+  async prepareRole(player: PlayerConfig, seat: number) {
+    if (!Number.isInteger(seat) || seat < 0 || seat > 5) {
+      throw new Error('请选择座位 1–6')
+    }
+    const collision = this.host.players().find((p) => p.id === player.id)
+    if (collision && JSON.stringify(collision) !== JSON.stringify(player)) {
+      throw new Error('该角色 ID 已被其他玩家配置使用，请复制为新的玩家 ID 后再选择')
+    }
+    // Restore the selected local table before editing, avoiding an asynchronous mount overwrite.
+    if (!this.mounted) {
+      this.mounted = true
+      const id = localStorage.getItem('strategy-lab-table')
+      if (id && /^[A-Za-z0-9-]+$/.test(id)) {
+        try {
+          await this.open(id)
+        } catch {
+          this.host.notice('上次牌桌无法载入，角色将填入新体验设置')
+        }
+      }
+      await this.loadHistory()
+    }
+    this.capture()
+    this.config ??= this.defaults()
+    this.config.seats[seat] = structuredClone(player)
   }
   async control(action: string) {
     if (!this.run) {

@@ -4,7 +4,14 @@ import { record } from '../analysis/strategy'
 import { payoutDuration } from '../table/pots'
 import { reviewTableHand } from '../analysis/table-history'
 import { readTableHandReview } from '../storage/table-history'
-import { emptyTableStats, addTableStats, tableStatValues } from '../analysis/table-stats'
+import { readTableStatsPlayers } from '../storage/table-stats'
+import {
+  emptyTableStats,
+  addTableStats,
+  tableStatValues,
+  tableStatPlayers,
+  type TableStatistics,
+} from '../analysis/table-stats'
 import { tableRequest, sampleTableAction } from '../client/table-solver'
 import { createLookupService } from '../client/lookup'
 import { validPlayer } from '../profiles/catalog'
@@ -69,6 +76,10 @@ export class TableRunner {
   private readonly active = new Map<string, Control>()
   private readonly starting = new Set<string>()
   private readonly writes = new Map<string, Promise<unknown>>()
+  private readonly statsCache = new Map<
+    string,
+    { completed: number; stats: TableStatistics; notice?: string }
+  >()
   private solver: ReturnType<typeof createLookupService> | null = null
   constructor(
     private readonly store: WorkbenchStore,
@@ -132,7 +143,36 @@ export class TableRunner {
     await this.persist(run)
     return this.detail(id)
   }
-  async detail(id: string) {
+  private async enrichStats(run: TableRun) {
+    if (
+      !Object.values(run.stats).some((group) => Object.values(group).some((row) => !row.players))
+    ) {
+      return
+    }
+    let cached = this.statsCache.get(run.id)
+    if (!cached || cached.completed !== run.completed) {
+      try {
+        cached = {
+          completed: run.completed,
+          stats: await readTableStatsPlayers(this.store, run.id, run.completed, run.stats),
+        }
+      } catch (error) {
+        cached = {
+          completed: run.completed,
+          stats: run.stats,
+          notice: `${error instanceof Error ? error.message : '历史玩家类型读取失败'}；保留原统计，不推测玩家类型。`,
+        }
+      }
+      this.statsCache.delete(run.id)
+      this.statsCache.set(run.id, cached)
+      if (this.statsCache.size > 16) {
+        this.statsCache.delete(this.statsCache.keys().next().value!)
+      }
+    }
+    run.stats = structuredClone(cached.stats)
+    run.statsNotice = cached.notice
+  }
+  async detail(id: string, withPlayers = true) {
     const run = structuredClone(
       this.active.get(id)?.run ??
         (await this.store.read<TableRun>(['table-runs', id, 'checkpoint.json']))
@@ -148,13 +188,16 @@ export class TableRunner {
       run.hand.deck = []
       run.hand.burned = []
     }
+    if (withPlayers) {
+      await this.enrichStats(run)
+    }
     return run
   }
   async list() {
     const rows = await Promise.all(
       (await this.store.list('table-runs')).map(async (id) => {
         try {
-          const run = await this.detail(id)
+          const run = await this.detail(id, false)
           return {
             id,
             createdAt: run.createdAt,
@@ -195,6 +238,7 @@ export class TableRunner {
       if (['completed', 'stopped'].includes(run.status)) {
         throw new Error('本次体验已结束，请新建牌桌')
       }
+      await this.enrichStats(run)
       run.status = 'running'
       run.problem = null
       const control: Control = { run, pause: false, stop: false, budget: step ? 1 : null }
@@ -494,15 +538,21 @@ export class TableRunner {
   }
   async csv(id: string) {
     const run = await this.detail(id)
-    const rows = ['分组,位置或类型,样本手数,翻前有效机会,VPIP%,PFR%,AF,WTSD%,净赢BB']
+    const quote = (value: string) =>
+      `"${(/^[=+@-]/.test(value) ? "'" + value : value).replace(/"/g, '""')}"`
+    const rows = [
+      'Session,已结算手数,分组,位置或类型,玩家类型及已发牌手数,样本手数,翻前有效机会,VPIP%,PFR%,AF,WTSD%,净赢BB',
+    ]
     for (const [kind, group] of Object.entries(run.stats)) {
       for (const [key, row] of Object.entries(group)) {
-        const v = tableStatValues(row),
-          safe = /^[=+@-]/.test(key) ? `'${key}` : key
+        const v = tableStatValues(row)
         rows.push(
           [
+            run.id,
+            run.completed,
             kind,
-            `"${safe.replace(/"/g, '""')}"`,
+            quote(key),
+            quote(tableStatPlayers(row) || '历史玩家类型未核实'),
             v.hands,
             v.opportunities,
             v.vpipPercent,

@@ -55,5 +55,16 @@ export function validPlayer(value: unknown): PlayerConfig {
     description: text(obj.description, '风格说明'),
     preflop,
     postflop,
+    ...(obj.sourceRole === undefined ? {} : { sourceRole: validRoleSource(obj.sourceRole) }),
   }
+}
+
+function validRoleSource(value: unknown): NonNullable<PlayerConfig['sourceRole']> {
+  const obj = record(value)
+  const id = text(obj.id, '来源角色编号', 20)
+  const version = text(obj.version, '来源角色版本', 40)
+  if (!/^L[1-5]-A[1-3]-F[1-5]$/.test(id) || !/^[A-Za-z0-9.-]+$/.test(version)) {
+    throw new Error('来源角色编号或版本无效')
+  }
+  return { id, version }
 }

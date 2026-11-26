@@ -99,7 +99,7 @@ export class TablePayout {
         }
       })
       for (const payout of pot.payouts) {
-        const target = surface.querySelector<HTMLElement>(`.seat-${payout.seat} .table-nameplate`)
+        const target = surface.querySelector<HTMLElement>(`.seat-${payout.seat} .table-front`)
         if (!target || !payout.amount) {
           continue
         }

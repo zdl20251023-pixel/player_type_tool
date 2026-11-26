@@ -51,7 +51,7 @@ test('independent batches preserve valid partial routes, continue after a failur
       const index = Number(context.batchIndex)
       attempts.set(index, (attempts.get(index) ?? 0) + 1)
       const attempt = attempts.get(index)!
-      expect(body.thinking).toEqual({ type: 'disabled' })
+      expect(body.thinking).toEqual({ type: 'enabled' })
       expect(body.max_tokens).toBe(8192)
       inFlight++
       peak = Math.max(peak, inFlight)
@@ -206,6 +206,27 @@ test('independent batches preserve valid partial routes, continue after a failur
     expect(
       balanced.batches.flatMap((b) => b.targets).filter((t) => t.stage === 'postflop')
     ).toHaveLength(5)
+    const automatic = await workbench.scenarioBatches.plan({
+      ...input,
+      count: 10,
+      batchMode: 'auto',
+      batchSize: 5,
+      concurrency: 3,
+    })
+    expect(automatic.batches.map((b) => b.targets.length)).toEqual([3, 3, 3, 1])
+    expect(automatic.concurrency).toBe(2)
+    expect(automatic.thinking).toBe('enabled')
+    const small = await workbench.scenarioBatches.plan({ ...input, count: 1, thinking: 'disabled' })
+    expect(small.batchSize).toBe(1)
+    expect(small.concurrency).toBe(1)
+    expect(small.thinking).toBe('disabled')
+    const prior = JSON.stringify(await workbench.scenarioBatches.detail(id))
+    const conflict = { ...input, count: 2, requirements: '翻前和翻后各3条' }
+    const callsBefore = [...attempts.values()].reduce((a, b) => a + b, 0)
+    expect(workbench.scenarioBatches.preview(conflict)).rejects.toThrow('共 6 条')
+    expect(workbench.scenarioBatches.create(conflict)).rejects.toThrow('共 6 条')
+    expect([...attempts.values()].reduce((a, b) => a + b, 0)).toBe(callsBefore)
+    expect(JSON.stringify(await workbench.scenarioBatches.detail(id))).toBe(prior)
   } finally {
     release()
     await upstream.stop(true)

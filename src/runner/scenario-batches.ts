@@ -3,6 +3,11 @@ import { record } from '../analysis/strategy'
 import { requestModel } from '../client/language-model'
 import { diagnoseModel, ModelRequestError, type ModelResult } from '../client/model-stream'
 import { validFixtures } from '../scenarios/generated'
+import {
+  describedStreetQuota,
+  generationConflict,
+  generationPlan,
+} from '../scenarios/generation-plan'
 import type { ScenarioFixture } from '../scenarios'
 import type { ScenarioGeneration, ScenarioBatch } from '../contracts/workbench'
 import type { WorkbenchStore } from '../storage/workbench'
@@ -95,23 +100,30 @@ export class ScenarioBatchRunner {
     const preview = await this.host.preview({ ...obj, task: 'scenarios' })
     const input = record(preview.input)
     const count = Number(input.count)
-    const batchSize = Number(obj.batchSize ?? 3)
-    const concurrency = Number(obj.concurrency ?? 2)
-    if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 5) {
-      throw new Error('每批数量必须为 1..5')
+    if (obj.batchMode !== undefined && obj.batchMode !== 'auto' && obj.batchMode !== 'manual') {
+      throw new Error('分批模式无效')
     }
-    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 3) {
-      throw new Error('并发批次必须为 1..3')
-    }
+    const { batchSize, concurrency } = generationPlan(count, {
+      batchMode: obj.batchMode,
+      batchSize: obj.batchSize === undefined ? undefined : Number(obj.batchSize),
+      concurrency: obj.concurrency === undefined ? undefined : Number(obj.concurrency),
+    })
     const stagePlan = (obj.stagePlan ?? 'auto') as ScenarioGeneration['stagePlan']
     if (!['auto', 'balanced', 'preflop', 'postflop'].includes(stagePlan)) {
       throw new Error('街道分配无效')
     }
     const requirements = String(input.requirements)
-    const equally = /翻前[和与、/\s]*翻后.{0,8}各\s*(\d+)/.exec(requirements)
-    const balanced =
-      stagePlan === 'balanced' ||
-      (stagePlan === 'auto' && equally && Number(equally[1]) * 2 === count)
+    const conflict = generationConflict(count, requirements)
+    if (conflict) {
+      throw new Error(conflict)
+    }
+    const quota = describedStreetQuota(requirements)
+    const preflopCount =
+      stagePlan === 'balanced'
+        ? Math.floor(count / 2)
+        : stagePlan === 'auto' && quota
+          ? quota.preflop
+          : null
     const targets: ScenarioBatch['targets'] = Array.from({ length: count }, (_, i) => ({
       id: `G${String(i + 1).padStart(3, '0')}`,
       stage:
@@ -119,8 +131,8 @@ export class ScenarioBatchRunner {
           ? 'preflop'
           : stagePlan === 'postflop'
             ? 'postflop'
-            : balanced
-              ? i < Math.floor(count / 2)
+            : preflopCount !== null
+              ? i < preflopCount
                 ? 'preflop'
                 : 'postflop'
               : null,
@@ -138,7 +150,7 @@ export class ScenarioBatchRunner {
       model: preview.model,
       prompt: preview.prompt,
       images: preview.images,
-      thinking: preview.thinking ?? 'disabled',
+      thinking: preview.thinking ?? 'enabled',
       stagePlan,
       batches: Array.from({ length: Math.ceil(count / batchSize) }, (_, index) => ({
         index,
